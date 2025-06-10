@@ -234,7 +234,7 @@ def generate_financial_statement(df_full_data: pd.DataFrame, statement_type: str
                 {cuenta_col:'3', nombre_col:'TOTAL PATRIMONIO', 'Valor':t_pat_bg},
                 {cuenta_col:'', nombre_col:'', 'Valor':None},
                 {cuenta_col:'', nombre_col:'TOTAL PASIVO + PATRIMONIO', 'Valor':t_pas_bg + t_pat_bg},
-                {cuenta_col:'', nombre_col:'VERIFICACIÓN (A-(P+Pt))', 'Valor':t_act_bg - (t_pas_bg + t_pat_bg)}
+                {cuenta_col:'', nombre_col:'VERIFICACIÓN (Activo = Pasivo+Patrimonio)', 'Valor':t_act_bg + t_pas_bg + t_pat_bg}
             ]
             return pd.DataFrame(rows_bg_totals_only)
         if nivel_col not in df_display_bg.columns: df_display_bg[nivel_col] = 1
@@ -261,7 +261,7 @@ def generate_financial_statement(df_full_data: pd.DataFrame, statement_type: str
         rows_to_add_bg_final = [
             {cuenta_col:'', nombre_col:'', 'Valor':None},
             {cuenta_col:'', nombre_col:'TOTAL PASIVO + PATRIMONIO', 'Valor':t_pas_bg + t_pat_bg},
-            {cuenta_col:'', nombre_col:'VERIFICACIÓN (A-(P+Pt))', 'Valor':t_act_bg - (t_pas_bg + t_pat_bg)}
+            {cuenta_col:'', nombre_col:'VERIFICACIÓN (Activo = Pasivo+Patrimonio)', 'Valor':t_act_bg + t_pas_bg + t_pat_bg}
         ]
         final_df_bg_display = pd.concat([final_df_bg_display, pd.DataFrame(rows_to_add_bg_final)], ignore_index=True)
         return final_df_bg_display
@@ -463,14 +463,10 @@ if report_type == "Estado de Resultados" and df_er_exists:
                 scc_name = er_config.get('CENTROS_COSTO_COLS',{}).get('Sin centro de coste')
                 if scc_name and scc_name in df_er_actual.columns: val_col_kpi = scc_name
     
-    # ##############################################################################
-    # ############# INICIO DEL BLOQUE DE CÁLCULO DE KPI CORREGIDO ####################
-    # ##############################################################################
     kpi_ing, kpi_cv, kpi_go, kpi_gno, kpi_imp, kpi_uo_calc, kpi_un_calc = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     if val_col_kpi and val_col_kpi in df_er_actual.columns:
         df_er_actual[val_col_kpi] = pd.to_numeric(df_er_actual[val_col_kpi], errors='coerce').fillna(0)
 
-        # Obtener valores de las cuentas principales
         kpi_ing = get_principal_account_value(df_er_actual, '4', val_col_kpi, cuenta_col_name_er)
         kpi_cv = get_principal_account_value(df_er_actual, '6', val_col_kpi, cuenta_col_name_er)
         go_51 = get_principal_account_value(df_er_actual, '51', val_col_kpi, cuenta_col_name_er)
@@ -479,17 +475,9 @@ if report_type == "Estado de Resultados" and df_er_exists:
         kpi_gno = get_principal_account_value(df_er_actual, '53', val_col_kpi, cuenta_col_name_er)
         kpi_imp = get_principal_account_value(df_er_actual, '54', val_col_kpi, cuenta_col_name_er)
 
-        # --- CÁLCULO CORREGIDO ---
-        # La utilidad operacional se calcula sumando directamente todos los componentes operacionales.
-        # Esto evita depender de una variable intermedia y hace la fórmula más clara.
-        # Utilidad Operacional = Ingresos + Costo de Ventas + Gastos de Admón + Gastos de Ventas + Costos de Producción
         kpi_uo_calc = kpi_ing + kpi_cv + go_51 + go_52 + cost_7
 
-        # La utilidad neta se calcula a partir de la utilidad operacional.
         kpi_un_calc = kpi_uo_calc + kpi_gno + kpi_imp
-    # ############################################################################
-    # ############### FIN DEL BLOQUE DE CÁLCULO DE KPI CORREGIDO ###################
-    # ############################################################################
 
     margen_op_calc = (kpi_uo_calc / kpi_ing) * 100 if kpi_ing != 0 else 0.0
     margen_neto_calc = (kpi_un_calc / kpi_ing) * 100 if kpi_ing != 0 else 0.0
@@ -569,7 +557,7 @@ if report_type == "Estado de Resultados" and df_er_exists:
             {"label": "Pasivos", "value": f"${t_pas_bg:,.0f}", "color": "#F44336"},
             {"label": "Patrimonio", "value": f"${t_pat_bg:,.0f}", "color": "#2196F3"},
             {"label": "Pasivo + Patrimonio", "value": f"${(t_pas_bg + t_pat_bg):,.0f}", "color": "#FF9800"},
-            {"label": "Verificación (A-(P+Pt))", "value": f"${(t_act_bg - (t_pas_bg + t_pat_bg)):,.0f}", "color": "#9C27B0"}, # Corregida la fórmula de verificación
+            {"label": "Verificación (A=P+Pt)", "value": f"${(t_act_bg + t_pas_bg + t_pat_bg):,.0f}", "color": "#9C27B0"},
             {"label": "Razón Corriente", "value": f"{razon_corriente:.2f}", "color": "#00BCD4"},
             {"label": "Liquidez", "value": f"{indicador_liquidez:.2f}", "color": "#009688"},
             {"label": "Cartera / Activo Corriente", "value": f"{indicador_cartera:.2%}", "color": "#FFC107"},
