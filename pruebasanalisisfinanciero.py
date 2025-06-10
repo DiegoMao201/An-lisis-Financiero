@@ -234,7 +234,7 @@ def generate_financial_statement(df_full_data: pd.DataFrame, statement_type: str
                 {cuenta_col:'3', nombre_col:'TOTAL PATRIMONIO', 'Valor':t_pat_bg},
                 {cuenta_col:'', nombre_col:'', 'Valor':None},
                 {cuenta_col:'', nombre_col:'TOTAL PASIVO + PATRIMONIO', 'Valor':t_pas_bg + t_pat_bg},
-                {cuenta_col:'', nombre_col:'VERIFICACIÓN (A-(P+Pt))', 'Valor':t_act_bg - (t_pas_bg + t_pat_bg)}
+                {cuenta_col:'', nombre_col:'VERIFICACIÓN (A+(P+Pt))', 'Valor':t_act_bg - (t_pas_bg + t_pat_bg)}
             ]
             return pd.DataFrame(rows_bg_totals_only)
         if nivel_col not in df_display_bg.columns: df_display_bg[nivel_col] = 1
@@ -261,7 +261,7 @@ def generate_financial_statement(df_full_data: pd.DataFrame, statement_type: str
         rows_to_add_bg_final = [
             {cuenta_col:'', nombre_col:'', 'Valor':None},
             {cuenta_col:'', nombre_col:'TOTAL PASIVO + PATRIMONIO', 'Valor':t_pas_bg + t_pat_bg},
-            {cuenta_col:'', nombre_col:'VERIFICACIÓN (A-(P+Pt))', 'Valor':t_act_bg - (t_pas_bg + t_pat_bg)}
+            {cuenta_col:'', nombre_col:'VERIFICACIÓN (A+(P+Pt))', 'Valor':t_act_bg - (t_pas_bg + t_pat_bg)}
         ]
         final_df_bg_display = pd.concat([final_df_bg_display, pd.DataFrame(rows_to_add_bg_final)], ignore_index=True)
         return final_df_bg_display
