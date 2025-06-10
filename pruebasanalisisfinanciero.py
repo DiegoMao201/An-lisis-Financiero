@@ -564,10 +564,3 @@ if search_account_input:
                             except: pass
                     st.dataframe(df_display_detalle_search_fmt, use_container_width=True, hide_index=True)
 
-import streamlit as st
-
-# Autenticación por contraseña
-password = st.text_input("Introduce la contraseña:", type="password")
-if password != st.secrets["general"]["password"]:
-    st.error("Contraseña incorrecta.")
-    st.stop()
