@@ -3,6 +3,18 @@ import streamlit as st
 import io
 import numpy as np
 
+# --- Autenticación por contraseña (debe ir al inicio) ---
+try:
+    real_password = st.secrets["general"]["password"]
+except Exception:
+    st.error("No se encontró la contraseña en los secretos de Streamlit. Contacta al administrador.")
+    st.stop()
+
+password = st.text_input("Introduce la contraseña:", type="password")
+if password != real_password:
+    st.warning("Debes ingresar la contraseña correcta para acceder al tablero.")
+    st.stop()
+
 # --- Configuración de Columnas (SIN CAMBIOS) ---
 COL_CONFIG = {
     'ESTADO_DE_RESULTADOS': {
