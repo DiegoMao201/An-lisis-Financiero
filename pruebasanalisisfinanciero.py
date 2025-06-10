@@ -4,7 +4,7 @@ import io
 import numpy as np
 
 # ==============================================================================
-#                 Configuración Inicial de Streamlit (DEBE IR PRIMERO)
+#        Configuración Inicial de Streamlit (DEBE IR PRIMERO)
 # ==============================================================================
 # st.set_page_config() debe ser la PRIMERA función de Streamlit llamada en el script.
 st.set_page_config(layout="wide", page_title="Análisis Financiero Avanzado")
@@ -12,7 +12,7 @@ st.set_page_config(layout="wide", page_title="Análisis Financiero Avanzado")
 st.title("💰 Análisis Financiero y Tablero Gerencial")
 
 # ==============================================================================
-#                           Autenticación por Contraseña
+#                      Autenticación por Contraseña
 # ==============================================================================
 # La lógica de autenticación sigue a la configuración de la página.
 try:
@@ -32,7 +32,7 @@ if password != real_password:
 # Si la contraseña es correcta, el código continúa después de este bloque.
 
 # ==============================================================================
-#                         Configuración de Columnas (Global)
+#                  Configuración de Columnas (Global)
 # ==============================================================================
 COL_CONFIG = {
     'ESTADO_DE_RESULTADOS': {
@@ -49,7 +49,7 @@ COL_CONFIG = {
 }
 
 # ==============================================================================
-#                             Funciones de Utilidad
+#                       Funciones de Utilidad
 # ==============================================================================
 def clean_numeric_value(value):
     """Limpia y convierte un valor a float, manejando comas/puntos como decimales."""
@@ -83,7 +83,7 @@ def get_principal_account_value(df: pd.DataFrame, principal_account_code: str, v
     return 0.0
 
 # ==============================================================================
-#                 Funciones para Generación y Formato de Reportes
+#            Funciones para Generación y Formato de Reportes
 # ==============================================================================
 
 def get_top_level_accounts_for_display(df_raw: pd.DataFrame, value_col_name: str, statement_type: str) -> pd.DataFrame:
@@ -234,7 +234,7 @@ def generate_financial_statement(df_full_data: pd.DataFrame, statement_type: str
                 {cuenta_col:'3', nombre_col:'TOTAL PATRIMONIO', 'Valor':t_pat_bg},
                 {cuenta_col:'', nombre_col:'', 'Valor':None},
                 {cuenta_col:'', nombre_col:'TOTAL PASIVO + PATRIMONIO', 'Valor':t_pas_bg + t_pat_bg},
-                {cuenta_col:'', nombre_col:'VERIFICACIÓN (A+(P+Pt))', 'Valor':t_act_bg - (t_pas_bg + t_pat_bg)}
+                {cuenta_col:'', nombre_col:'VERIFICACIÓN (A-(P+Pt))', 'Valor':t_act_bg - (t_pas_bg + t_pat_bg)}
             ]
             return pd.DataFrame(rows_bg_totals_only)
         if nivel_col not in df_display_bg.columns: df_display_bg[nivel_col] = 1
@@ -261,7 +261,7 @@ def generate_financial_statement(df_full_data: pd.DataFrame, statement_type: str
         rows_to_add_bg_final = [
             {cuenta_col:'', nombre_col:'', 'Valor':None},
             {cuenta_col:'', nombre_col:'TOTAL PASIVO + PATRIMONIO', 'Valor':t_pas_bg + t_pat_bg},
-            {cuenta_col:'', nombre_col:'VERIFICACIÓN (A+(P+Pt))', 'Valor':t_act_bg - (t_pas_bg + t_pat_bg)}
+            {cuenta_col:'', nombre_col:'VERIFICACIÓN (A-(P+Pt))', 'Valor':t_act_bg - (t_pas_bg + t_pat_bg)}
         ]
         final_df_bg_display = pd.concat([final_df_bg_display, pd.DataFrame(rows_to_add_bg_final)], ignore_index=True)
         return final_df_bg_display
@@ -339,7 +339,7 @@ def generate_styled_vertical_analysis_er_table(input_df: pd.DataFrame, total_ing
     return styled_df_object
 
 # ==============================================================================
-#                 Lógica Principal de la Aplicación Streamlit
+#              Lógica Principal de la Aplicación Streamlit
 # ==============================================================================
 
 # --- Inicialización de session_state para los dataframes MAESTROS ---
@@ -462,24 +462,41 @@ if report_type == "Estado de Resultados" and df_er_exists:
             else:
                 scc_name = er_config.get('CENTROS_COSTO_COLS',{}).get('Sin centro de coste')
                 if scc_name and scc_name in df_er_actual.columns: val_col_kpi = scc_name
+    
+    # ##############################################################################
+    # ############# INICIO DEL BLOQUE DE CÁLCULO DE KPI CORREGIDO ####################
+    # ##############################################################################
     kpi_ing, kpi_cv, kpi_go, kpi_gno, kpi_imp, kpi_uo_calc, kpi_un_calc = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     if val_col_kpi and val_col_kpi in df_er_actual.columns:
         df_er_actual[val_col_kpi] = pd.to_numeric(df_er_actual[val_col_kpi], errors='coerce').fillna(0)
+
+        # Obtener valores de las cuentas principales
         kpi_ing = get_principal_account_value(df_er_actual, '4', val_col_kpi, cuenta_col_name_er)
         kpi_cv = get_principal_account_value(df_er_actual, '6', val_col_kpi, cuenta_col_name_er)
         go_51 = get_principal_account_value(df_er_actual, '51', val_col_kpi, cuenta_col_name_er)
         go_52 = get_principal_account_value(df_er_actual, '52', val_col_kpi, cuenta_col_name_er)
         cost_7 = get_principal_account_value(df_er_actual, '7', val_col_kpi, cuenta_col_name_er)
-        kpi_go = go_51 + go_52 + cost_7
         kpi_gno = get_principal_account_value(df_er_actual, '53', val_col_kpi, cuenta_col_name_er)
         kpi_imp = get_principal_account_value(df_er_actual, '54', val_col_kpi, cuenta_col_name_er)
-        kpi_uo_calc = kpi_ing + kpi_cv + kpi_go
+
+        # --- CÁLCULO CORREGIDO ---
+        # La utilidad operacional se calcula sumando directamente todos los componentes operacionales.
+        # Esto evita depender de una variable intermedia y hace la fórmula más clara.
+        # Utilidad Operacional = Ingresos + Costo de Ventas + Gastos de Admón + Gastos de Ventas + Costos de Producción
+        kpi_uo_calc = kpi_ing + kpi_cv + go_51 + go_52 + cost_7
+
+        # La utilidad neta se calcula a partir de la utilidad operacional.
         kpi_un_calc = kpi_uo_calc + kpi_gno + kpi_imp
+    # ############################################################################
+    # ############### FIN DEL BLOQUE DE CÁLCULO DE KPI CORREGIDO ###################
+    # ############################################################################
+
     margen_op_calc = (kpi_uo_calc / kpi_ing) * 100 if kpi_ing != 0 else 0.0
     margen_neto_calc = (kpi_un_calc / kpi_ing) * 100 if kpi_ing != 0 else 0.0
     cols_kpi_er_disp = st.columns(2)
     cols_kpi_er_disp[0].metric("Utilidad Operativa", f"${kpi_uo_calc:,.0f}", f"{margen_op_calc:.1f}% Margen Op.")
     cols_kpi_er_disp[1].metric("Utilidad Neta", f"${kpi_un_calc:,.0f}", f"{margen_neto_calc:.1f}% Margen Neto")
+    
     er_niv_col_slider_disp = er_config.get('NIVEL_LINEA', 'Grupo')
     if er_niv_col_slider_disp in df_er_actual.columns:
         niveles_er_s = df_er_actual[er_niv_col_slider_disp].dropna()
