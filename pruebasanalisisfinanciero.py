@@ -563,3 +563,11 @@ if search_account_input:
                                 df_display_detalle_search_fmt[col_fmt_det_search] = pd.to_numeric(df_display_detalle_search_fmt[col_fmt_det_search], errors='coerce').apply(lambda x: f"{x:,.0f}" if pd.notna(x) and isinstance(x, (int, float)) else ("" if pd.isna(x) else x))
                             except: pass
                     st.dataframe(df_display_detalle_search_fmt, use_container_width=True, hide_index=True)
+
+import streamlit as st
+
+# Autenticación por contraseña
+password = st.text_input("Introduce la contraseña:", type="password")
+if password != st.secrets["general"]["password"]:
+    st.error("Contraseña incorrecta.")
+    st.stop()
