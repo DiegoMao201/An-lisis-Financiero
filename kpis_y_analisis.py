@@ -1,0 +1,106 @@
+# kpis_y_analisis.py
+import pandas as pd
+from mi_logica_original import get_principal_account_value, COL_CONFIG
+
+def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame) -> dict:
+    """Calcula un set de KPIs para un único periodo."""
+    kpis = {}
+    
+    er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
+    bg_conf = COL_CONFIG['BALANCE_GENERAL']
+    
+    # --- Determinar la columna de valor para el ER consolidado ---
+    val_col_kpi = ''
+    total_col_name = er_conf.get('CENTROS_COSTO_COLS',{}).get('Total')
+    if total_col_name and total_col_name in df_er.columns:
+        val_col_kpi = total_col_name
+    else:
+        ind_cc_cols = [v for k, v in er_conf.get('CENTROS_COSTO_COLS',{}).items() if str(k).lower() not in ['total', 'sin centro de coste'] and v in df_er.columns]
+        if ind_cc_cols:
+            df_er['__temp_sum_kpi'] = df_er[ind_cc_cols].sum(axis=1)
+            val_col_kpi = '__temp_sum_kpi'
+        else:
+            scc_name = er_conf.get('CENTROS_COSTO_COLS',{}).get('Sin centro de coste')
+            if scc_name and scc_name in df_er.columns:
+                val_col_kpi = scc_name
+    
+    if not val_col_kpi or val_col_kpi not in df_er.columns:
+        return {"error": "No se pudo determinar la columna de valor consolidado para el ER."}
+
+    # --- Extraer valores del ER ---
+    cuenta_er = er_conf['CUENTA']
+    ingresos = get_principal_account_value(df_er, '4', val_col_kpi, cuenta_er)
+    costo_ventas = get_principal_account_value(df_er, '6', val_col_kpi, cuenta_er)
+    gastos_admin = get_principal_account_value(df_er, '51', val_col_kpi, cuenta_er)
+    gastos_ventas = get_principal_account_value(df_er, '52', val_col_kpi, cuenta_er)
+    costos_prod = get_principal_account_value(df_er, '7', val_col_kpi, cuenta_er)
+    gastos_no_op = get_principal_account_value(df_er, '53', val_col_kpi, cuenta_er)
+    impuestos = get_principal_account_value(df_er, '54', val_col_kpi, cuenta_er)
+    
+    utilidad_bruta = ingresos + costo_ventas
+    utilidad_operacional = utilidad_bruta + gastos_admin + gastos_ventas + costos_prod
+    utilidad_neta = utilidad_operacional + gastos_no_op + impuestos
+    
+    kpis['ingresos'] = ingresos
+    kpis['utilidad_bruta'] = utilidad_bruta
+    kpis['utilidad_operacional'] = utilidad_operacional
+    kpis['utilidad_neta'] = utilidad_neta
+    
+    # --- Extraer valores del BG ---
+    cuenta_bg = bg_conf['CUENTA']
+    saldo_final_col = bg_conf['SALDO_FINAL']
+    
+    activo = get_principal_account_value(df_bg, '1', saldo_final_col, cuenta_bg)
+    pasivo = get_principal_account_value(df_bg, '2', saldo_final_col, cuenta_bg)
+    patrimonio = get_principal_account_value(df_bg, '3', saldo_final_col, cuenta_bg)
+    
+    # Activo Corriente (simplificado, puedes ajustar los códigos de cuenta)
+    activo_corriente = sum([
+        get_principal_account_value(df_bg, '11', saldo_final_col, cuenta_bg),
+        get_principal_account_value(df_bg, '12', saldo_final_col, cuenta_bg),
+        get_principal_account_value(df_bg, '13', saldo_final_col, cuenta_bg),
+        get_principal_account_value(df_bg, '14', saldo_final_col, cuenta_bg)
+    ])
+    inventarios = get_principal_account_value(df_bg, '14', saldo_final_col, cuenta_bg)
+
+    # Pasivo Corriente (simplificado)
+    pasivo_corriente = sum([
+        get_principal_account_value(df_bg, '21', saldo_final_col, cuenta_bg),
+        get_principal_account_value(df_bg, '22', saldo_final_col, cuenta_bg),
+        get_principal_account_value(df_bg, '23', saldo_final_col, cuenta_bg)
+    ])
+    
+    # --- Calcular Ratios Financieros ---
+    # Liquidez
+    kpis['razon_corriente'] = activo_corriente / pasivo_corriente if pasivo_corriente != 0 else 0
+    kpis['prueba_acida'] = (activo_corriente - inventarios) / pasivo_corriente if pasivo_corriente != 0 else 0
+    
+    # Endeudamiento
+    kpis['endeudamiento_activo'] = pasivo / activo if activo != 0 else 0
+    kpis['apalancamiento'] = pasivo / patrimonio if patrimonio != 0 else 0
+    
+    # Rentabilidad
+    kpis['margen_bruto'] = utilidad_bruta / ingresos if ingresos != 0 else 0
+    kpis['margen_operacional'] = utilidad_operacional / ingresos if ingresos != 0 else 0
+    kpis['margen_neto'] = utilidad_neta / ingresos if ingresos != 0 else 0
+    kpis['roa'] = utilidad_neta / activo if activo != 0 else 0
+    kpis['roe'] = utilidad_neta / patrimonio if patrimonio != 0 else 0
+    
+    return kpis
+
+def preparar_datos_tendencia(datos_historicos: dict) -> pd.DataFrame:
+    """Convierte el diccionario de datos históricos en un DataFrame para graficar tendencias."""
+    lista_periodos = []
+    for periodo, data in datos_historicos.items():
+        kpis = data.get('kpis', {})
+        if kpis:
+            kpis['periodo'] = periodo
+            lista_periodos.append(kpis)
+    
+    if not lista_periodos:
+        return pd.DataFrame()
+        
+    df_tendencia = pd.DataFrame(lista_periodos)
+    df_tendencia['periodo'] = pd.to_datetime(df_tendencia['periodo'], format='%Y-%m')
+    df_tendencia = df_tendencia.sort_values(by='periodo').reset_index(drop=True)
+    return df_tendencia
