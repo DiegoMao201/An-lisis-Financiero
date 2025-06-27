@@ -92,14 +92,12 @@ def preparar_datos_tendencia(datos_historicos: dict) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def generar_analisis_avanzado_ia(_kpis_actuales: dict, _df_er_actual: pd.DataFrame, nombre_cc: str, periodo_actual: str):
-    """
-    Genera un análisis financiero profundo y visualmente atractivo utilizando el modelo Gemini de Google.
-    """
+    """Genera un análisis financiero profundo para un periodo único."""
     try:
         api_key = st.secrets["google_ai"]["api_key"]
         genai.configure(api_key=api_key)
     except Exception:
-        return "🔴 **Error:** No se encontró la clave de API de Google AI en los secretos."
+        return "🔴 **Error:** No se encontró la clave de API de Google AI."
 
     er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
     cuenta_col_er = er_conf.get('CUENTA', 'Cuenta')
@@ -127,35 +125,23 @@ def generar_analisis_avanzado_ia(_kpis_actuales: dict, _df_er_actual: pd.DataFra
 
     prompt = f"""
     **Rol:** Actúa como un Asesor Financiero Estratégico y un experto en comunicación para la alta gerencia. Tu objetivo es transformar datos crudos en un informe gerencial claro, conciso y visualmente atractivo que impulse la toma de decisiones.
-
     **Contexto:** Estás analizando los resultados del centro de costo: "{nombre_cc}" para el periodo: "{periodo_actual}".
-
     **Datos Financieros Clave:**
-    - **Ingresos:** ${_kpis_actuales.get('ingresos', 0):,.0f}
-    - **Utilidad Neta:** ${_kpis_actuales.get('utilidad_neta', 0):,.0f}
-    - **Margen Neto:** {_kpis_actuales.get('margen_neto', 0):.2%}
-    - **Rentabilidad sobre Patrimonio (ROE):** {_kpis_actuales.get('roe', 0):.2%}
-    - **Razón Corriente (Liquidez):** {_kpis_actuales.get('razon_corriente', 0):.2f}
-    - **Nivel de Endeudamiento (sobre Activo):** {_kpis_actuales.get('endeudamiento_activo', 0):.2%}
-    - **Gastos Operativos Totales:** ${_kpis_actuales.get('gastos_operativos', 0):,.0f}
-
-    **Top 5 Gastos Operativos del Periodo:**
+    - Ingresos: ${_kpis_actuales.get('ingresos', 0):,.0f}
+    - Utilidad Neta: ${_kpis_actuales.get('utilidad_neta', 0):,.0f}
+    - Margen Neto: {_kpis_actuales.get('margen_neto', 0):.2%}
+    - ROE: {_kpis_actuales.get('roe', 0):.2%}
+    - Razón Corriente: {_kpis_actuales.get('razon_corriente', 0):.2f}
+    - Endeudamiento: {_kpis_actuales.get('endeudamiento_activo', 0):.2%}
+    **Top 5 Gastos Operativos:**
     {top_5_gastos_str}
-
-    **Instrucciones de Formato y Contenido:**
-    Tu respuesta debe ser un informe gerencial profesional, fácil de leer y visualmente organizado. Usa emojis de forma inteligente (ej: 📈, 📉, ⚠️, ✅, 💡) para guiar la vista y enfatizar los puntos más importantes. La estructura debe ser exactamente la siguiente:
-
+    **Instrucciones:** Tu respuesta debe ser un informe gerencial profesional, fácil de leer y visualmente organizado. Usa emojis (ej: 📈, ⚠️, ✅, 💡) para enfatizar puntos. La estructura debe ser:
     ### Diagnóstico General 🎯
-    (Ofrece un veredicto claro y directo en un párrafo sobre la salud financiera. ¿La situación es excelente, buena, preocupante o crítica? Sé directo y justifica tu veredicto inicial con 1 o 2 datos clave.)
-
+    (Veredicto claro y directo sobre la salud financiera.)
     ### Puntos Clave del Periodo 🔑
-    (Presenta un análisis en formato de lista (bullet points). Para cada punto, no solo menciones el dato, sino su **implicación de negocio**. Por ejemplo: en lugar de 'La razón corriente es 0.8', di '⚠️ **Alerta de Liquidez (Razón Corriente: 0.8):** Existe un riesgo de no poder cubrir las deudas a corto plazo, lo que requiere atención inmediata al flujo de caja.')
-    - **Rentabilidad:** Analiza el Margen Neto y el ROE. ¿Se está generando valor de forma eficiente?
-    - **Estructura de Costos:** Analiza los gastos operativos en relación con los ingresos. ¿Son sostenibles? Comenta sobre los gastos más significativos.
-    - **Solvencia y Riesgo:** Analiza la liquidez (Razón Corriente) y el nivel de endeudamiento. ¿Qué tan riesgosa es la estructura de capital?
-
+    (Lista con la implicación de negocio de la Rentabilidad, Costos y Solvencia.)
     ### Plan de Acción Recomendado 💡
-    (Proporciona una lista de 2 a 3 recomendaciones **específicas, priorizadas y accionables** basadas en el diagnóstico. No des consejos genéricos. Si los gastos de personal son altos, sugiere '1. Realizar un análisis de la estructura de personal vs. ingresos para identificar optimizaciones.' en lugar de solo 'reducir gastos'.)
+    (Lista de 2-3 recomendaciones específicas y accionables.)
     """
 
     try:
@@ -164,4 +150,51 @@ def generar_analisis_avanzado_ia(_kpis_actuales: dict, _df_er_actual: pd.DataFra
         cleaned_response = response.text.replace('•', '*')
         return cleaned_response
     except Exception as e:
-        return f"🔴 **Error al contactar la IA:** {e}. Revisa la API Key y la configuración."
+        return f"🔴 **Error al contactar la IA:** {e}."
+
+@st.cache_data(show_spinner=False)
+def generar_analisis_tendencia_ia(_df_tendencia: pd.DataFrame):
+    """Genera un análisis de EVOLUCIÓN y TENDENCIA para un comité directivo."""
+    try:
+        api_key = st.secrets["google_ai"]["api_key"]
+        genai.configure(api_key=api_key)
+    except Exception:
+        return "🔴 **Error:** No se encontró la clave de API de Google AI."
+
+    primer_periodo = _df_tendencia.iloc[0]
+    ultimo_periodo = _df_tendencia.iloc[-1]
+    
+    resumen_datos = f"""
+    - **Periodo Analizado:** De {primer_periodo['periodo'].strftime('%Y-%m')} a {ultimo_periodo['periodo'].strftime('%Y-%m')}.
+    - **Ingresos:** Crecieron de ${primer_periodo['ingresos']:,.0f} a ${ultimo_periodo['ingresos']:,.0f}.
+    - **Utilidad Neta:** Pasó de ${primer_periodo['utilidad_neta']:,.0f} a ${ultimo_periodo['utilidad_neta']:,.0f}.
+    - **Margen Neto:** Evolucionó de {primer_periodo['margen_neto']:.2%} a {ultimo_periodo['margen_neto']:.2%}.
+    - **Razón Corriente (Liquidez):** Varió de {primer_periodo['razon_corriente']:.2f} a {ultimo_periodo['razon_corriente']:.2f}.
+    - **Endeudamiento (sobre Activo):** Cambió de {primer_periodo['endeudamiento_activo']:.2%} a {ultimo_periodo['endeudamiento_activo']:.2%}.
+    - **ROE:** Se movió de {primer_periodo['roe']:.2%} a {ultimo_periodo['roe']:.2%}.
+    """
+
+    prompt = f"""
+    **Rol:** Eres un Analista Financiero Senior y Asesor Estratégico presentando un informe de evolución de negocio a un comité directivo. Tu análisis debe ser agudo, orientado a la acción y fácil de entender.
+    **Contexto:** Has analizado la evolución financiera consolidada de la compañía durante varios periodos. Aquí está el resumen de la trayectoria:
+    {resumen_datos}
+    **Instrucciones de Formato y Contenido:**
+    Tu respuesta debe ser un informe de evolución de alto nivel, visualmente organizado con Markdown y emojis (📈, 📉, ⚠️, ✅, 💡). La estructura debe ser la siguiente:
+    ### Veredicto Estratégico 📜
+    (En un párrafo, da un veredicto sobre la trayectoria general de la compañía. ¿La tendencia es positiva y sostenible, muestra signos de estancamiento, o hay señales de alerta preocupantes? Justifica tu conclusión.)
+    ### Análisis de Evolución por Área 🔍
+    (Presenta un análisis en formato de lista. Para cada área, describe la tendencia observada y su implicación estratégica.)
+    - **Crecimiento y Rentabilidad:** ¿El crecimiento de los ingresos se traduce en una mayor rentabilidad (margen neto, ROE)? ¿O están creciendo los ingresos a costa de los márgenes?
+    - **Eficiencia Operativa:** ¿Cómo ha evolucionado la relación entre ingresos y gastos operativos a lo largo del tiempo? ¿La empresa se está volviendo más o menos eficiente?
+    - **Salud y Riesgo Financiero:** ¿La posición de liquidez (Razón Corriente) ha mejorado o empeorado? ¿El nivel de endeudamiento es sostenible o representa un riesgo creciente?
+    ### Prioridades para el Próximo Trimestre 🎯
+    (Basado en la evolución, proporciona una lista de 2 a 3 prioridades estratégicas y accionables que la dirección debería enfocarse en los próximos 3 meses.)
+    """
+
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        cleaned_response = response.text.replace('•', '*')
+        return cleaned_response
+    except Exception as e:
+        return f"🔴 **Error al contactar la IA:** {e}."
