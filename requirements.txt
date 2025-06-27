@@ -4,3 +4,4 @@ numpy
 openpyxl
 dropbox
 plotly
+google-generativeai
