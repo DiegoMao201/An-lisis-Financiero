@@ -7,7 +7,6 @@ from mi_logica_original import get_principal_account_value, COL_CONFIG
 def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: str = 'Todos') -> dict:
     """Calcula un set de KPIs para un único periodo, opcionalmente filtrado por centro de costo."""
     kpis = {}
-
     er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
     bg_conf = COL_CONFIG['BALANCE_GENERAL']
 
@@ -18,16 +17,16 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
         else:
             return {"error": f"Centro de costo '{cc_filter}' no encontrado."}
     else:
-        total_col_name = er_conf.get('CENTROS_COSTO_COLS',{}).get('Total')
+        total_col_name = er_conf.get('CENTROS_COSTO_COLS', {}).get('Total')
         if total_col_name and total_col_name in df_er.columns:
             val_col_kpi = total_col_name
         else:
-            ind_cc_cols = [v for k, v in er_conf.get('CENTROS_COSTO_COLS',{}).items() if str(k).lower() not in ['total', 'sin centro de coste'] and v in df_er.columns]
+            ind_cc_cols = [v for k, v in er_conf.get('CENTROS_COSTO_COLS', {}).items() if str(k).lower() not in ['total', 'sin centro de coste'] and v in df_er.columns]
             if ind_cc_cols:
                 df_er['__temp_sum_kpi'] = df_er.loc[:, ind_cc_cols].sum(axis=1)
                 val_col_kpi = '__temp_sum_kpi'
             else:
-                scc_name = er_conf.get('CENTROS_COSTO_COLS',{}).get('Sin centro de coste')
+                scc_name = er_conf.get('CENTROS_COSTO_COLS', {}).get('Sin centro de coste')
                 if scc_name and scc_name in df_er.columns:
                     val_col_kpi = scc_name
                 elif 'Total_Consolidado_ER' in df_er.columns:
@@ -43,7 +42,7 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     costos_prod = get_principal_account_value(df_er, '7', val_col_kpi, cuenta_er)
     gastos_no_op = get_principal_account_value(df_er, '53', val_col_kpi, cuenta_er)
     impuestos = get_principal_account_value(df_er, '54', val_col_kpi, cuenta_er)
-
+    
     utilidad_bruta = ingresos + costo_ventas
     gastos_operativos = gastos_admin + gastos_ventas + costos_prod
     utilidad_operacional = utilidad_bruta + gastos_operativos
@@ -62,7 +61,6 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     activo = get_principal_account_value(df_bg, '1', saldo_final_col, cuenta_bg)
     pasivo = get_principal_account_value(df_bg, '2', saldo_final_col, cuenta_bg)
     patrimonio = get_principal_account_value(df_bg, '3', saldo_final_col, cuenta_bg)
-
     activo_corriente = sum([get_principal_account_value(df_bg, c, saldo_final_col, cuenta_bg) for c in ['11','12','13','14']])
     inventarios = get_principal_account_value(df_bg, '14', saldo_final_col, cuenta_bg)
     pasivo_corriente = sum([get_principal_account_value(df_bg, c, saldo_final_col, cuenta_bg) for c in ['21','22','23']])
@@ -72,11 +70,10 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     kpis['roe'] = utilidad_neta / patrimonio if patrimonio != 0 else 0
     kpis['margen_neto'] = utilidad_neta / ingresos if ingresos > 0 else 0
     kpis['margen_operacional'] = utilidad_operacional / ingresos if ingresos > 0 else 0
-
+    
     return kpis
 
 def preparar_datos_tendencia(datos_historicos: dict) -> pd.DataFrame:
-    """Convierte el diccionario de datos históricos en un DataFrame para graficar tendencias."""
     lista_periodos = [
         dict(periodo=periodo, **data['kpis']['Todos'])
         for periodo, data in datos_historicos.items()
@@ -90,9 +87,6 @@ def preparar_datos_tendencia(datos_historicos: dict) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def generar_analisis_avanzado_ia(_kpis_actuales: dict, _df_er_actual: pd.DataFrame, nombre_cc: str, periodo_actual: str):
-    """
-    Genera un análisis financiero profundo utilizando el modelo Gemini de Google.
-    """
     try:
         api_key = st.secrets["google_ai"]["api_key"]
         genai.configure(api_key=api_key)
@@ -100,7 +94,10 @@ def generar_analisis_avanzado_ia(_kpis_actuales: dict, _df_er_actual: pd.DataFra
         return "🔴 **Error:** No se encontró la clave de API de Google AI."
 
     er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
-    gastos_df = _df_er_actual[_df_er_actual.get(er_conf['CUENTA'], '').str.startswith(('5', '7'), na=False)].copy()
+    cuenta_col_er = er_conf.get('CUENTA', 'Cuenta')
+    nombre_col_er = er_conf.get('NOMBRE_CUENTA', 'Título')
+    
+    gastos_df = _df_er_actual[_df_er_actual.get(cuenta_col_er, pd.Series(dtype=str)).str.startswith(('5', '7'), na=False)].copy()
 
     val_col = ''
     if nombre_cc != 'Todos' and nombre_cc in gastos_df.columns:
@@ -110,16 +107,14 @@ def generar_analisis_avanzado_ia(_kpis_actuales: dict, _df_er_actual: pd.DataFra
     else:
         ind_cc_cols = [v for k, v in er_conf.get('CENTROS_COSTO_COLS',{}).items() if str(k).lower() not in ['total', 'sin centro de coste'] and v in gastos_df.columns]
         if ind_cc_cols:
-            gastos_df['__temp_sum_gastos'] = gastos_df.loc[:, ind_cc_cols].sum(axis=1)
+            gastos_df['__temp_sum_gastos'] = gastos_df[ind_cc_cols].sum(axis=1)
             val_col = '__temp_sum_gastos'
 
     top_5_gastos_str = "No se pudieron determinar los gastos principales."
-    if val_col and er_conf['NOMBRE_CUENTA'] in gastos_df.columns and val_col in gastos_df.columns:
-        gastos_df_filtered = gastos_df[[er_conf['NOMBRE_CUENTA'], val_col]].dropna()
-        gastos_df_filtered.loc[:, val_col] = pd.to_numeric(gastos_df_filtered.loc[:, val_col], errors='coerce').abs()
+    if val_col and nombre_col_er in gastos_df.columns and val_col in gastos_df.columns:
+        gastos_df_filtered = gastos_df[[nombre_col_er, val_col]].dropna()
+        gastos_df_filtered[val_col] = pd.to_numeric(gastos_df_filtered[val_col], errors='coerce').abs()
         top_5_gastos = gastos_df_filtered.nlargest(5, val_col)
-        # --- LÍNEA CORREGIDA ---
-        # Se cambió row.iloc[:, 0] y row.iloc[:, 1] por row.iloc[0] y row.iloc[1] para leer la fila correctamente.
         top_5_gastos_str = "\n".join([f"- {row.iloc[0]}: ${row.iloc[1]:,.0f}" for _, row in top_5_gastos.iterrows()])
 
     prompt = f"""
@@ -146,12 +141,13 @@ def generar_analisis_avanzado_ia(_kpis_actuales: dict, _df_er_actual: pd.DataFra
     except Exception as e:
         return f"🔴 **Error al contactar la IA:** {e}."
 
-def generar_lista_cuentas(df: pd.DataFrame, nivel_col: str = 'Grupo', nivel: int = 1) -> list:
+def generar_lista_cuentas(df: pd.DataFrame, nivel: int) -> list:
     """Genera una lista de cuentas filtradas por nivel."""
-    if nivel_col in df.columns:
-        return sorted(df.loc[(df.iloc[:, df.columns.get_loc(nivel_col)]) <= nivel, COL_CONFIG['ESTADO_DE_RESULTADOS']['NOMBRE_CUENTA']].unique())
+    nivel_col = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('NIVEL_LINEA', 'Grupo')
+    nombre_col = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('NOMBRE_CUENTA', 'Título')
+    
+    if nivel_col in df.columns and nombre_col in df.columns:
+        mask_nivel = pd.to_numeric(df[nivel_col], errors='coerce') <= nivel
+        cuentas = df.loc[mask_nivel, nombre_col].unique()
+        return sorted(list(cuentas))
     return []
-```
-Con esta corrección, el error `IndexingError` desaparecerá y la IA debería poder generar el análisis sin problemas. Simplemente actualiza el archivo en tu repositorio de GitHub y la aplicación se redesplegará automáticamente con la solución.
-
-¡Avísame en cuanto se actualice!
