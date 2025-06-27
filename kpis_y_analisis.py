@@ -5,27 +5,35 @@ import google.generativeai as genai
 from mi_logica_original import get_principal_account_value, COL_CONFIG
 
 def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: str = 'Todos') -> dict:
-    """Calcula un set de KPIs para un único periodo, opcionalmente filtrado por centro de costo."""
+    """
+    Calcula un set de KPIs para un único periodo.
+    Esta función es la ÚNICA fuente de verdad para los cálculos numéricos.
+    Se adapta para calcular el consolidado ('Todos') o un centro de costo específico.
+    """
     kpis = {}
     er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
     bg_conf = COL_CONFIG['BALANCE_GENERAL']
 
     val_col_kpi = ''
+    # Lógica para determinar qué columna de valor usar según el filtro
     if cc_filter and cc_filter != 'Todos':
         if cc_filter in df_er.columns:
             val_col_kpi = cc_filter
         else:
+            # Si el centro de costo no existe, retorna KPIs vacíos para evitar errores.
             return {"error": f"Centro de costo '{cc_filter}' no encontrado."}
-    else:
+    else: # Si el filtro es 'Todos', se calcula el consolidado.
         total_col_name = er_conf.get('CENTROS_COSTO_COLS', {}).get('Total')
         if total_col_name and total_col_name in df_er.columns:
             val_col_kpi = total_col_name
         else:
+            # Si no hay una columna 'Total', suma las columnas de los centros de costo individuales.
             ind_cc_cols = [v for k, v in er_conf.get('CENTROS_COSTO_COLS', {}).items() if str(k).lower() not in ['total', 'sin centro de coste'] and v in df_er.columns]
             if ind_cc_cols:
                 df_er['__temp_sum_kpi'] = df_er.loc[:, ind_cc_cols].sum(axis=1)
                 val_col_kpi = '__temp_sum_kpi'
             else:
+                # Como último recurso, busca otras columnas de total o sin centro de costo.
                 scc_name = er_conf.get('CENTROS_COSTO_COLS', {}).get('Sin centro de coste')
                 if scc_name and scc_name in df_er.columns:
                     val_col_kpi = scc_name
@@ -34,6 +42,7 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
 
     if not val_col_kpi or val_col_kpi not in df_er.columns: return kpis
 
+    # --- CÁLCULOS DEL ESTADO DE RESULTADOS ---
     cuenta_er = er_conf['CUENTA']
     ingresos = get_principal_account_value(df_er, '4', val_col_kpi, cuenta_er)
     costo_ventas = get_principal_account_value(df_er, '6', val_col_kpi, cuenta_er)
@@ -54,7 +63,8 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     kpis['utilidad_bruta'] = utilidad_bruta
     kpis['utilidad_operacional'] = utilidad_operacional
     kpis['utilidad_neta'] = utilidad_neta
-
+    
+    # --- CÁLCULOS DEL BALANCE GENERAL (Siempre consolidados) ---
     cuenta_bg = bg_conf['CUENTA']
     saldo_final_col = bg_conf['SALDO_FINAL']
 
@@ -65,6 +75,7 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     inventarios = get_principal_account_value(df_bg, '14', saldo_final_col, cuenta_bg)
     pasivo_corriente = sum([get_principal_account_value(df_bg, c, saldo_final_col, cuenta_bg) for c in ['21','22','23']])
 
+    # --- CÁLCULO FINAL DE RATIOS ---
     kpis['razon_corriente'] = activo_corriente / pasivo_corriente if pasivo_corriente != 0 else 0
     kpis['endeudamiento_activo'] = pasivo / activo if activo != 0 else 0
     kpis['roe'] = utilidad_neta / patrimonio if patrimonio != 0 else 0
@@ -74,6 +85,7 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     return kpis
 
 def preparar_datos_tendencia(datos_historicos: dict) -> pd.DataFrame:
+    """Convierte el diccionario de datos históricos en un DataFrame para graficar tendencias."""
     lista_periodos = [
         dict(periodo=periodo, **data['kpis']['Todos'])
         for periodo, data in datos_historicos.items()
@@ -87,6 +99,9 @@ def preparar_datos_tendencia(datos_historicos: dict) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def generar_analisis_avanzado_ia(_kpis_actuales: dict, _df_er_actual: pd.DataFrame, nombre_cc: str, periodo_actual: str):
+    """
+    Genera un análisis financiero profundo y visualmente atractivo utilizando el modelo Gemini de Google.
+    """
     try:
         api_key = st.secrets["google_ai"]["api_key"]
         genai.configure(api_key=api_key)
@@ -117,37 +132,60 @@ def generar_analisis_avanzado_ia(_kpis_actuales: dict, _df_er_actual: pd.DataFra
         top_5_gastos = gastos_df_filtered.nlargest(5, val_col)
         top_5_gastos_str = "\n".join([f"- {row.iloc[0]}: ${row.iloc[1]:,.0f}" for _, row in top_5_gastos.iterrows()])
 
+    # --- PROMPT AVANZADO PARA LA IA ---
     prompt = f"""
-    Actúa como un Director Financiero (CFO) experto. Analiza los resultados de "{nombre_cc}" para "{periodo_actual}".
+    **Rol:** Actúa como un Asesor Financiero Estratégico y un experto en comunicación para la alta gerencia. Tu objetivo es transformar datos crudos en un informe gerencial claro, conciso y visualmente atractivo que impulse la toma de decisiones.
 
-    Datos clave:
-    - Ingresos: ${_kpis_actuales.get('ingresos', 0):,.0f}
-    - Utilidad Neta: ${_kpis_actuales.get('utilidad_neta', 0):,.0f}
-    - Margen Neto: {_kpis_actuales.get('margen_neto', 0):.2%}
-    - ROE: {_kpis_actuales.get('roe', 0):.2%}
-    - Razón Corriente: {_kpis_actuales.get('razon_corriente', 0):.2f}
-    - Endeudamiento (Activo): {_kpis_actuales.get('endeudamiento_activo', 0):.2%}
-    - Gastos Operativos Totales: ${_kpis_actuales.get('gastos_operativos', 0):,.0f}
-    Gastos principales:
+    **Contexto:** Estás analizando los resultados del centro de costo: "{nombre_cc}" para el periodo: "{periodo_actual}".
+
+    **Datos Financieros Clave:**
+    - **Ingresos:** ${_kpis_actuales.get('ingresos', 0):,.0f}
+    - **Utilidad Neta:** ${_kpis_actuales.get('utilidad_neta', 0):,.0f}
+    - **Margen Neto:** {_kpis_actuales.get('margen_neto', 0):.2%}
+    - **Rentabilidad sobre Patrimonio (ROE):** {_kpis_actuales.get('roe', 0):.2%}
+    - **Razón Corriente (Liquidez):** {_kpis_actuales.get('razon_corriente', 0):.2f}
+    - **Nivel de Endeudamiento (sobre Activo):** {_kpis_actuales.get('endeudamiento_activo', 0):.2%}
+    - **Gastos Operativos Totales:** ${_kpis_actuales.get('gastos_operativos', 0):,.0f}
+
+    **Top 5 Gastos Operativos del Periodo:**
     {top_5_gastos_str}
 
-    Genera un análisis CFO en 3 secciones (Resumen, Diagnóstico, Consejos) con formato Markdown, basado **solo** en estos datos.
+    **Instrucciones de Formato y Contenido:**
+    Tu respuesta debe ser un informe gerencial profesional, fácil de leer y visualmente organizado. Usa emojis de forma inteligente (ej: 📈, 📉, ⚠️, ✅, 💡) para guiar la vista y enfatizar los puntos más importantes. La estructura debe ser exactamente la siguiente:
+
+    ### Diagnóstico General 🎯
+    (Ofrece un veredicto claro y directo en un párrafo sobre la salud financiera. ¿La situación es excelente, buena, preocupante o crítica? Sé directo y justifica tu veredicto inicial con 1 o 2 datos clave.)
+
+    ### Puntos Clave del Periodo 🔑
+    (Presenta un análisis en formato de lista (bullet points). Para cada punto, no solo menciones el dato, sino su **implicación de negocio**. Por ejemplo: en lugar de 'La razón corriente es 0.8', di '⚠️ **Alerta de Liquidez (Razón Corriente: 0.8):** Existe un riesgo de no poder cubrir las deudas a corto plazo, lo que requiere atención inmediata al flujo de caja.')
+    - **Rentabilidad:** Analiza el Margen Neto y el ROE. ¿Se está generando valor de forma eficiente?
+    - **Estructura de Costos:** Analiza los gastos operativos en relación con los ingresos. ¿Son sostenibles? Comenta sobre los gastos más significativos.
+    - **Solvencia y Riesgo:** Analiza la liquidez (Razón Corriente) y el nivel de endeudamiento. ¿Qué tan riesgosa es la estructura de capital?
+
+    ### Plan de Acción Recomendado 💡
+    (Proporciona una lista de 2 a 3 recomendaciones **específicas, priorizadas y accionables** basadas en el diagnóstico. No des consejos genéricos. Si los gastos de personal son altos, sugiere '1. Realizar un análisis de la estructura de personal vs. ingresos para identificar optimizaciones.' en lugar de solo 'reducir gastos'.)
     """
 
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
-        return response.text
+        # Limpieza final para asegurar que el Markdown se renderice bien
+        cleaned_response = response.text.replace('•', '*')
+        return cleaned_response
     except Exception as e:
-        return f"🔴 **Error al contactar la IA:** {e}."
+        return f"🔴 **Error al contactar la IA:** {e}. Revisa la API Key y la configuración."
 
 def generar_lista_cuentas(df: pd.DataFrame, nivel: int) -> list:
-    """Genera una lista de cuentas filtradas por nivel."""
+    """Genera una lista de cuentas filtradas por nivel para el dropdown."""
     nivel_col = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('NIVEL_LINEA', 'Grupo')
     nombre_col = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('NOMBRE_CUENTA', 'Título')
     
     if nivel_col in df.columns and nombre_col in df.columns:
-        mask_nivel = pd.to_numeric(df[nivel_col], errors='coerce') <= nivel
+        # Asegurarse que la columna de nivel sea numérica
+        df[nivel_col] = pd.to_numeric(df[nivel_col], errors='coerce')
+        mask_nivel = df[nivel_col] <= nivel
         cuentas = df.loc[mask_nivel, nombre_col].unique()
         return sorted(list(cuentas))
     return []
+
+Ahora, cuando selecciones un periodo y un centro de costo, el análisis que recibirás del CFO Virtual será drásticamente diferente: más organizado, más visual, y con la profundidad que un informe gerencial requiere. ¡Con esto, el tablero realmente comenzará a "hablar financieramente"!
