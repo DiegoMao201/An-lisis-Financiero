@@ -30,7 +30,7 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
                 scc_name = er_conf.get('CENTROS_COSTO_COLS',{}).get('Sin centro de coste')
                 if scc_name and scc_name in df_er.columns:
                     val_col_kpi = scc_name
-                elif 'Total_Consolidado_ER' in df_er.columns: # Añadido fallback
+                elif 'Total_Consolidado_ER' in df_er.columns:
                     val_col_kpi = 'Total_Consolidado_ER'
 
     if not val_col_kpi or val_col_kpi not in df_er.columns: return kpis
@@ -118,7 +118,9 @@ def generar_analisis_avanzado_ia(_kpis_actuales: dict, _df_er_actual: pd.DataFra
         gastos_df_filtered = gastos_df[[er_conf['NOMBRE_CUENTA'], val_col]].dropna()
         gastos_df_filtered.loc[:, val_col] = pd.to_numeric(gastos_df_filtered.loc[:, val_col], errors='coerce').abs()
         top_5_gastos = gastos_df_filtered.nlargest(5, val_col)
-        top_5_gastos_str = "\n".join([f"- {row.iloc[:, 0]}: ${row.iloc[:, 1]:,.0f}" for _, row in top_5_gastos.iterrows()])
+        # --- LÍNEA CORREGIDA ---
+        # Se cambió row.iloc[:, 0] y row.iloc[:, 1] por row.iloc[0] y row.iloc[1] para leer la fila correctamente.
+        top_5_gastos_str = "\n".join([f"- {row.iloc[0]}: ${row.iloc[1]:,.0f}" for _, row in top_5_gastos.iterrows()])
 
     prompt = f"""
     Actúa como un Director Financiero (CFO) experto. Analiza los resultados de "{nombre_cc}" para "{periodo_actual}".
@@ -149,3 +151,7 @@ def generar_lista_cuentas(df: pd.DataFrame, nivel_col: str = 'Grupo', nivel: int
     if nivel_col in df.columns:
         return sorted(df.loc[(df.iloc[:, df.columns.get_loc(nivel_col)]) <= nivel, COL_CONFIG['ESTADO_DE_RESULTADOS']['NOMBRE_CUENTA']].unique())
     return []
+```
+Con esta corrección, el error `IndexingError` desaparecerá y la IA debería poder generar el análisis sin problemas. Simplemente actualiza el archivo en tu repositorio de GitHub y la aplicación se redesplegará automáticamente con la solución.
+
+¡Avísame en cuanto se actualice!
