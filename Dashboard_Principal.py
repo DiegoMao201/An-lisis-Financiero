@@ -227,5 +227,3 @@ else:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
-```
-Esta versión es la definitiva que combina la funcionalidad completa con el diseño visual mejorado y limpio que discutimos. ¡Pruébala y verás que todo está ahí!
