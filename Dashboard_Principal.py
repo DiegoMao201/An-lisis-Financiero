@@ -10,11 +10,31 @@ from dropbox_connector import get_dropbox_client, find_financial_files, load_exc
 from kpis_y_analisis import calcular_kpis_periodo, preparar_datos_tendencia, generar_analisis_avanzado_ia
 
 # ==============================================================================
-#                 CONFIGURACIÓN DE PÁGINA Y AUTENTICACIÓN
+#                 CONFIGURACIÓN DE PÁGINA Y ESTILOS
 # ==============================================================================
 st.set_page_config(layout="wide", page_title="Análisis Financiero Inteligente")
 st.title("🤖 Análisis Financiero Inteligente por IA")
 
+# --- ESTILOS VISUALES CON LA CORRECCIÓN PARA TEXTO LARGO ---
+st.markdown("""
+<style>
+.ai-analysis-text {
+    /* ESTA ES LA REGLA CLAVE: Fuerza al texto a romperse si no cabe */
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+}
+.main .block-container {
+    padding-top: 2rem;
+    padding-left: 2rem;
+    padding-right: 2rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# ==============================================================================
+#                 AUTENTICACIÓN
+# ==============================================================================
 try:
     real_password = st.secrets["general"]["password"]
 except Exception:
@@ -28,21 +48,20 @@ if not st.session_state.authenticated:
     password = st.text_input("Introduce la contraseña para acceder:", type="password")
     if password == real_password:
         st.session_state.authenticated = True
-        st.rerun() # Recarga la página para mostrar el contenido
+        st.rerun()
     else:
-        if password: # Si el usuario ha escrito algo y es incorrecto
+        if password:
             st.warning("Contraseña incorrecta.")
         st.stop()
 
 # ==============================================================================
 #               CARGA DE DATOS AUTOMÁTICA DESDE DROPBOX
 # ==============================================================================
-@st.cache_data(ttl=3600) # Cache de 1 hora
+@st.cache_data(ttl=3600)
 def cargar_y_procesar_datos():
     """Función maestra que conecta, descarga y procesa todos los archivos de Dropbox."""
     dbx = get_dropbox_client()
-    if not dbx:
-        return None
+    if not dbx: return None
     
     archivos_financieros = find_financial_files(dbx, base_folder="/data")
     if not archivos_financieros:
@@ -85,8 +104,8 @@ if 'datos_historicos' not in st.session_state:
     st.session_state.datos_historicos = None
 
 if st.sidebar.button("Refrescar Datos de Dropbox", use_container_width=True):
-    st.cache_data.clear() # Limpia el cache
-    st.session_state.datos_historicos = None # Forza la recarga
+    st.cache_data.clear()
+    st.session_state.datos_historicos = None
 
 if st.session_state.datos_historicos is None:
     st.session_state.datos_historicos = cargar_y_procesar_datos()
@@ -127,8 +146,12 @@ if selected_view == "Análisis General (Tendencias)":
     st.markdown("---")
     st.subheader("Evolución Financiera")
     
-    # (Aquí iría el código completo de los gráficos de tendencia que ya funcionaba)
-
+    fig_utilidades = go.Figure()
+    fig_utilidades.add_trace(go.Bar(x=df_tendencia['periodo'], y=df_tendencia['ingresos'], name='Ingresos', marker_color='#1f77b4'))
+    fig_utilidades.add_trace(go.Scatter(x=df_tendencia['periodo'], y=df_tendencia['utilidad_operacional'], name='Utilidad Operacional', mode='lines+markers', line=dict(color='#ff7f0e', width=3)))
+    fig_utilidades.add_trace(go.Scatter(x=df_tendencia['periodo'], y=df_tendencia['utilidad_neta'], name='Utilidad Neta', mode='lines+markers', line=dict(color='#2ca02c', width=3)))
+    fig_utilidades.update_layout(title='Evolución de Ingresos y Utilidades', legend_title_text='')
+    st.plotly_chart(fig_utilidades, use_container_width=True)
 
 # ==============================================================================
 #       VISTA DE PERIODO ÚNICO (CON LAYOUT LIMPIO Y TODAS LAS FUNCIONALIDADES)
@@ -163,7 +186,7 @@ else:
     # --- OBTENCIÓN DE DATOS PARA LA VISTA ACTUAL ---
     selected_kpis = kpis_por_tienda.get(cc_filter, {})
 
-    # --- KPIs PRINCIPALES (FULL WIDTH) ---
+    # --- KPIs PRINCIPALES ---
     st.subheader(f"🔍 KPIs para: {cc_filter}")
     kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
     kpi_col1.metric("Margen Neto", f"{selected_kpis.get('margen_neto', 0):.2%}")
@@ -173,16 +196,16 @@ else:
 
     st.markdown("---")
 
-    # --- ANÁLISIS DE IA DENTRO DE UN EXPANDER (FULL WIDTH) ---
+    # --- ANÁLISIS DE IA DENTRO DE UN EXPANDER ---
     with st.expander("🧠 Ver Análisis y Consejos del CFO Virtual (IA)", expanded=True):
         with st.spinner('El CFO Virtual está analizando los datos...'):
             analisis_ia = generar_analisis_avanzado_ia(selected_kpis, df_er_actual, cc_filter, selected_view)
         
-        st.markdown(analisis_ia, unsafe_allow_html=True)
+        st.markdown(f"<div class='ai-analysis-text'>{analisis_ia}</div>", unsafe_allow_html=True)
 
     st.markdown("---")
     
-    # --- REPORTES DETALLADOS EN PESTAÑAS (FULL WIDTH) ---
+    # --- REPORTES DETALLADOS EN PESTAÑAS ---
     st.subheader("📊 Reportes Financieros Detallados")
     tab1, tab2 = st.tabs(["Estado de Resultados", "Balance General"])
 
@@ -194,7 +217,7 @@ else:
         df_bg_display = generate_financial_statement(df_bg_actual, 'Balance General', 99)
         st.dataframe(df_bg_display.style.format({'Valor': "${:,.0f}"}), use_container_width=True, hide_index=True)
 
-    # --- RESULTADOS DEL BUSCADOR DE CUENTAS (AL FINAL) ---
+    # --- RESULTADOS DEL BUSCADOR DE CUENTAS ---
     if search_account_input:
         st.markdown("---")
         with st.expander(f"Resultado de la búsqueda para cuentas que inician con '{search_account_input}'", expanded=True):
@@ -227,3 +250,5 @@ else:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
+```
+Ahora sí, este es el script completo sin lugar a dudas, incluyendo todas las funcionalidades y correcciones que hemos discutido. ¡Pruébalo y verás que todo está en su sitio!
