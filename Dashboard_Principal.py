@@ -196,5 +196,3 @@ else:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
-```
-Con esta corrección, la importación se realizará correctamente y la aplicación debería funcionar sin el `SyntaxError`. Lamento la confusión y agradezco tu paciencia. ¡Avísame cuando se actualice!
