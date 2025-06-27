@@ -250,5 +250,3 @@ else:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
-```
-Ahora sí, este es el script completo sin lugar a dudas, incluyendo todas las funcionalidades y correcciones que hemos discutido. ¡Pruébalo y verás que todo está en su sitio!
