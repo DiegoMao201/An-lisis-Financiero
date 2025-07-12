@@ -2,9 +2,9 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from analisis_adicional import calcular_analisis_vertical, calcular_analisis_horizontal # Importamos las nuevas funciones
+from analisis_adicional import calcular_analisis_vertical, calcular_analisis_horizontal
 from mi_logica_original import COL_CONFIG, generate_financial_statement
-from kpis_y_analisis import generar_analisis_tendencia_ia # Reutilizamos la IA de tendencias
+from kpis_y_analisis import generar_analisis_avanzado_ia
 
 st.set_page_config(layout="wide", page_title="Análisis Financiero Detallado")
 st.title("🔬 Análisis Financiero Detallado")
@@ -22,14 +22,14 @@ sorted_periods = sorted(datos_historicos.keys(), reverse=True)
 
 # --- Pestañas de Análisis ---
 tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Análisis Vertical y Horizontal", 
+    "📊 Análisis Vertical y Horizontal",
     "🏆 Mejor Periodo del Año (IA)",
     "💰 Análisis de Rentabilidad (DuPont)",
     "🚑 Test Ácido y Ciclo de Efectivo"
 ])
 
 # ==============================================================================
-#                      PESTAÑA 1: ANÁLISIS VERTICAL Y HORIZONTAL
+#      PESTAÑA 1: ANÁLISIS VERTICAL Y HORIZONTAL (CON IA MEJORADA)
 # ==============================================================================
 with tab1:
     st.header("Análisis Vertical y Horizontal")
@@ -41,70 +41,97 @@ with tab1:
     with col2:
         periodos_anteriores = [p for p in sorted_periods if p < periodo_actual_vh]
         periodo_anterior_vh = st.selectbox(
-            "Selecciona el Periodo para Comparar (Horizontal):", 
-            periodos_anteriores, 
+            "Selecciona el Periodo para Comparar (Horizontal):",
+            periodos_anteriores,
             key="periodo_vh_anterior",
             disabled=not periodos_anteriores
         )
 
     # --- Carga de datos para los periodos seleccionados ---
     data_actual = datos_historicos[periodo_actual_vh]
-    df_er_actual = data_actual['df_er_master']
-    df_bg_actual = data_actual['df_bg_master']
+    df_er_actual_full = data_actual['df_er_master']
+    df_bg_actual_full = data_actual['df_bg_master']
     
-    data_anterior = datos_historicos.get(periodo_anterior_vh) if periodo_anterior_vh else None
-    df_er_anterior = data_anterior['df_er_master'] if data_anterior else pd.DataFrame()
-    df_bg_anterior = data_anterior['df_bg_master'] if data_anterior else pd.DataFrame()
-
+    df_er_display_actual = generate_financial_statement(df_er_actual_full, 'Estado de Resultados', 'Todos', 99)
+    df_bg_display_actual = generate_financial_statement(df_bg_actual_full, 'Balance General', 'Todos', 99)
+    
     er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
     bg_conf = COL_CONFIG['BALANCE_GENERAL']
     
-    # --- Análisis del Estado de Resultados ---
+    # --- IA PARA ANÁLISIS HORIZONTAL ---
+    if periodo_anterior_vh:
+        data_anterior = datos_historicos[periodo_anterior_vh]
+        df_er_anterior_full = data_anterior['df_er_master']
+        df_bg_anterior_full = data_anterior['df_bg_master']
+        
+        df_er_display_anterior = generate_financial_statement(df_er_anterior_full, 'Estado de Resultados', 'Todos', 99)
+        
+        df_horizontal = calcular_analisis_horizontal(df_er_display_actual, df_er_display_anterior, 'Valor', er_conf['CUENTA'])
+        df_horizontal['Variacion_Abs_Num'] = pd.to_numeric(df_horizontal['Variación Absoluta'], errors='coerce').fillna(0)
+        
+        top_5_variaciones = df_horizontal.nlargest(5, 'Variacion_Abs_Num')
+        bottom_5_variaciones = df_horizontal.nsmallest(5, 'Variacion_Abs_Num')
+
+        prompt_horizontal = f"""
+        **Rol:** Eres un Contralor Financiero experto. Analizas la comparación entre dos periodos ({periodo_actual_vh} vs {periodo_anterior_vh}) para un comité de gerencia. Tu lenguaje debe ser profesional, claro y directo.
+
+        **Contexto:** Se está evaluando la evolución del negocio. Aquí están las variaciones más significativas en el Estado de Resultados:
+        - **Mayores Incrementos de Gasto/Reducciones de Ingreso (Impacto Negativo):**
+        {bottom_5_variaciones[['Cuenta', 'Valor Actual', 'Valor Anterior', 'Variación Absoluta', 'Variación Relativa (%)']].to_string()}
+        - **Mayores Aumentos de Ingreso/Reducciones de Gasto (Impacto Positivo):**
+        {top_5_variaciones[['Cuenta', 'Valor Actual', 'Valor Anterior', 'Variación Absoluta', 'Variación Relativa (%)']].to_string()}
+
+        **Instrucciones:**
+        1.  **Diagnóstico General (1 párrafo):** Ofrece un veredicto sobre la evolución. ¿La empresa mejoró o empeoró financieramente entre estos periodos? Sé directo y fundamenta tu respuesta en las cifras.
+        2.  **Puntos Positivos a Destacar ✅:** Lista 2-3 puntos buenos de la comparación. Explica la implicación de negocio. (Ej: "La reducción del costo de ventas sugiere una mejora en las negociaciones con proveedores o una mayor eficiencia productiva.").
+        3.  **Focos Rojos de Alerta ⚠️:** Lista 2-3 puntos negativos. Explica el riesgo o problema. (Ej: "El aumento desproporcionado de gastos administrativos frente a los ingresos indica una posible pérdida de eficiencia interna que consume nuestros márgenes.").
+        4.  **Recomendación Estratégica 🎯:** Basado en el análisis, ofrece una recomendación clave, concreta y accionable.
+        """
+        
+        with st.expander("🧠 Ver Análisis Comparativo por IA", expanded=True):
+             with st.spinner("El Contralor IA está comparando los periodos..."):
+                analisis_comparativo = generar_analisis_avanzado_ia({}, pd.DataFrame(), f"Comparación {periodo_actual_vh} vs {periodo_anterior_vh}", prompt_horizontal)
+                st.markdown(analisis_comparativo, unsafe_allow_html=True)
+                
+    # --- Visualización de tablas ---
     st.subheader("Estado de Resultados")
     expander_er = st.expander("Ver Análisis Detallado de ER", expanded=True)
     with expander_er:
-        # Vertical
-        df_er_vf = generate_financial_statement(df_er_actual, 'Estado de Resultados', 'Todos', 99)
-        df_er_vertical = calcular_analisis_vertical(df_er_vf, 'Valor', er_conf['CUENTA'], '4')
+        df_er_vertical = calcular_analisis_vertical(df_er_display_actual, 'Valor', er_conf['CUENTA'], '4')
         st.write("**Análisis Vertical (Periodo Actual)**")
         st.dataframe(df_er_vertical.style.format({'Valor': "${:,.0f}", 'Análisis Vertical (%)': "{:.2f}%"}), use_container_width=True)
 
-        # Horizontal
-        if not df_er_anterior.empty:
-            df_er_hf = generate_financial_statement(df_er_anterior, 'Estado de Resultados', 'Todos', 99)
-            df_er_horizontal = calcular_analisis_horizontal(df_er_vf, df_er_hf, 'Valor', er_conf['CUENTA'])
+        if periodo_anterior_vh:
+            df_er_horizontal = calcular_analisis_horizontal(df_er_display_actual, df_er_display_anterior, 'Valor', er_conf['CUENTA'])
             st.write("**Análisis Horizontal (Comparativo)**")
             st.dataframe(df_er_horizontal.style.format({
-                'Valor Actual': "${:,.0f}", 'Valor Anterior': "${:,.0f}", 
+                'Valor Actual': "${:,.0f}", 'Valor Anterior': "${:,.0f}",
                 'Variación Absoluta': "${:,.0f}", 'Variación Relativa (%)': "{:.2f}%"
             }), use_container_width=True)
 
-    # --- Análisis del Balance General ---
     st.subheader("Balance General")
     expander_bg = st.expander("Ver Análisis Detallado de BG", expanded=True)
     with expander_bg:
-        # Vertical
-        df_bg_vf = generate_financial_statement(df_bg_actual, 'Balance General', 'Todos', 99)
-        df_bg_vertical = calcular_analisis_vertical(df_bg_vf, 'Valor', bg_conf['CUENTA'], '1')
+        df_bg_vertical = calcular_analisis_vertical(df_bg_display_actual, 'Valor', bg_conf['CUENTA'], '1')
         st.write("**Análisis Vertical (Periodo Actual)**")
         st.dataframe(df_bg_vertical.style.format({'Valor': "${:,.0f}", 'Análisis Vertical (%)': "{:.2f}%"}), use_container_width=True)
 
-        # Horizontal
-        if not df_bg_anterior.empty:
-            df_bg_hf = generate_financial_statement(df_bg_anterior, 'Balance General', 'Todos', 99)
-            df_bg_horizontal = calcular_analisis_horizontal(df_bg_vf, df_bg_hf, 'Valor', bg_conf['CUENTA'])
+        if periodo_anterior_vh:
+            df_bg_display_anterior = generate_financial_statement(df_bg_anterior_full, 'Balance General', 'Todos', 99)
+            df_bg_horizontal = calcular_analisis_horizontal(df_bg_display_actual, df_bg_display_anterior, 'Valor', bg_conf['CUENTA'])
             st.write("**Análisis Horizontal (Comparativo)**")
             st.dataframe(df_bg_horizontal.style.format({
                 'Valor Actual': "${:,.0f}", 'Valor Anterior': "${:,.0f}",
                 'Variación Absoluta': "${:,.0f}", 'Variación Relativa (%)': "{:.2f}%"
             }), use_container_width=True)
 
+
 # ==============================================================================
-#                      PESTAÑA 2: MEJOR PERIODO DEL AÑO (IA)
+#            PESTAÑA 2: MEJOR PERIODO DEL AÑO (CON IA MEJORADA)
 # ==============================================================================
 with tab2:
-    st.header("🏆 Identificación del Mejor Periodo del Año con IA")
-    st.markdown("La IA analiza toda la historia financiera para determinar cuál fue el periodo más exitoso y explica las razones clave de dicho éxito.")
+    st.header("🏆 Identificación del Periodo de Mejor Desempeño Relativo")
+    st.markdown("La IA analiza la historia para identificar el periodo que, aunque no sea perfecto, mostró las señales más prometedoras o el menor deterioro, y extrae lecciones clave.")
 
     if len(datos_historicos) < 2:
         st.info("Se necesitan al menos dos periodos para realizar una comparación.")
@@ -112,8 +139,7 @@ with tab2:
         df_tendencia = pd.DataFrame([
             {'periodo': p, **d['kpis']['Todos']} for p, d in datos_historicos.items()
         ]).sort_values('periodo').reset_index(drop=True)
-
-        # Criterios para definir el "mejor" periodo (puedes ajustarlos)
+        
         df_tendencia['score'] = (
             df_tendencia['margen_neto'].rank(pct=True) * 0.4 +
             df_tendencia['roe'].rank(pct=True) * 0.3 +
@@ -123,51 +149,40 @@ with tab2:
         mejor_periodo_row = df_tendencia.loc[df_tendencia['score'].idxmax()]
         mejor_periodo_key = pd.to_datetime(mejor_periodo_row['periodo']).strftime('%Y-%m')
 
-        st.success(f"**El mejor periodo identificado es: {mejor_periodo_key}**")
+        st.info(f"**Periodo de mejor desempeño relativo identificado: {mejor_periodo_key}**")
 
-        with st.spinner("Generando análisis detallado del porqué..."):
-            # Reutilizamos la función de análisis de tendencia pero con un prompt enfocado
-            prompt_mejor_periodo = f"""
-            **Rol:** Eres un Analista Financiero Senior que debe explicar a la junta directiva por qué el mes de {mejor_periodo_key} fue el mejor del año.
-            
-            **Contexto:** Se ha determinado que {mejor_periodo_key} fue el periodo de mayor rendimiento financiero basándose en una combinación de rentabilidad, crecimiento y solidez.
-            
-            **Datos del Mejor Periodo ({mejor_periodo_key}):**
-            - Ingresos: ${mejor_periodo_row['ingresos']:,.0f}
-            - Utilidad Neta: ${mejor_periodo_row['utilidad_neta']:,.0f}
-            - Margen Neto: {mejor_periodo_row['margen_neto']:.2%}
-            - ROE: {mejor_periodo_row['roe']:.2%}
-            - Razón Corriente: {mejor_periodo_row['razon_corriente']:.2f}
+        es_negativo = mejor_periodo_row['utilidad_neta'] < 0 or mejor_periodo_row['margen_neto'] < 0
 
-            **Instrucciones:**
-            1.  **Título Atractivo:** Comienza con un título como "🏆 {mejor_periodo_key}: Anatomía de un Mes Exitoso".
-            2.  **Diagnóstico Ejecutivo:** Explica en un párrafo por qué este mes fue excepcional.
-            3.  **Factores Clave del Éxito:** Usa una lista con viñetas y emojis para detallar los 3 principales factores que llevaron a este resultado (Ej: ✅ **Rentabilidad Superior:**, 📈 **Crecimiento Sólido:**, 💧 **Liquidez Robusta:**).
-            4.  **Lecciones Aprendidas:** Concluye con 2 lecciones estratégicas que la empresa puede aprender y replicar de este periodo.
-            """
-            
-            # Aquí usamos una llamada directa a la IA similar a tus funciones existentes
-            # Nota: Esto es un ejemplo, necesitarías integrar la llamada a `genai` como en `kpis_y_analisis.py`
-            # análisis_ia = generar_analisis_con_prompt_especifico(prompt_mejor_periodo)
-            # Por ahora, mostraremos un texto de ejemplo:
-            
-            analisis_ia = f"""
-            ### 🏆 {mejor_periodo_key}: Anatomía de un Mes Exitoso
+        titulo_analisis = f"🏅 {mejor_periodo_key}: Anatomía de Nuestro Mejor Esfuerzo" if es_negativo else f"🏆 {mejor_periodo_key}: Anatomía de un Mes Exitoso"
+        contexto_analisis = "Aunque los resultados generales siguen siendo un desafío, este fue el mes en que mostramos el desempeño más sólido y logramos contener mejor las pérdidas." if es_negativo else "Este mes representa un pináculo en el rendimiento financiero del año, demostrando un crecimiento y rentabilidad saludables."
 
-            El mes de **{mejor_periodo_key}** se destaca como el pináculo del rendimiento financiero del año, no solo por un crecimiento notable en los ingresos, sino por una excepcional capacidad de convertir ese crecimiento en rentabilidad real y sostenible, manteniendo una salud financiera envidiable.
+        prompt_mejor_periodo_realista = f"""
+        **Rol:** Eres un Asesor Financiero Estratégico (CFO) que se dirige al equipo directivo. Tu tono es realista, didáctico y orientado a la acción. Debes ser brutalmente honesto pero constructivo.
 
-            #### Factores Clave del Éxito 🔑
+        **Contexto General:** {contexto_analisis}
 
-            * **✅ Rentabilidad Máxima:** Se alcanzó un Margen Neto de **{mejor_periodo_row['margen_neto']:.2%}**, lo que indica una gestión de costos y gastos extraordinariamente eficiente durante este periodo. Cada peso de venta generó más utilidad que en cualquier otro mes.
-            * **📈 Crecimiento con Calidad:** Los ingresos de **${mejor_periodo_row['ingresos']:,.0f}** no solo fueron altos, sino que se tradujeron directamente en un ROE del **{mejor_periodo_row['roe']:.2%}**, demostrando que la inversión de los accionistas fue altamente productiva.
-            * **💧 Solidez Financiera:** Con una Razón Corriente de **{mejor_periodo_row['razon_corriente']:.2f}**, la empresa demostró una capacidad sobresaliente para cubrir sus obligaciones a corto plazo, otorgando una gran tranquilidad y flexibilidad operativa.
+        **Datos Clave del Periodo ({mejor_periodo_key}):**
+        - Ingresos: ${mejor_periodo_row['ingresos']:,.0f}
+        - Utilidad Neta: ${mejor_periodo_row['utilidad_neta']:,.0f}
+        - Margen Neto: {mejor_periodo_row['margen_neto']:.2%}
+        - ROE: {mejor_periodo_row['roe']:.2%}
+        - Razón Corriente: {mejor_periodo_row['razon_corriente']:.2f}
 
-            #### Lecciones para Replicar 💡
+        **Instrucciones:**
+        1.  **Título:** Usa este título: "{titulo_analisis}".
+        2.  **Diagnóstico Sincero (1 párrafo):** Explica por qué este mes fue el 'mejor' en términos relativos. Si los números son negativos, reconócelo inmediatamente. No uses lenguaje hiperbólico como 'excepcional' o 'envidiable' si los KPIs son malos. En su lugar, di "fue el periodo donde mejoramos nuestro margen de -10% a -2%" o "logramos el nivel más alto de ingresos a pesar de la rentabilidad negativa".
+        3.  **Lecciones Clave del Periodo (en lugar de 'Factores de Éxito'):**
+            - Usa una lista con viñetas y emojis (🌱, 💡, ⚠️).
+            - **Analiza cada KPI clave de forma crítica:**
+                - **Rentabilidad:** Si el margen es -2.17%, tu análisis debe ser: "🌱 **Contención de Pérdidas:** Aunque un margen de {mejor_periodo_row['margen_neto']:.2%} sigue siendo una pérdida, es una mejora significativa respecto a otros periodos. Debemos investigar qué gastos se controlaron mejor este mes para replicarlo".
+                - **Crecimiento:** "💡 **Nivel de Ingresos:** Alcanzar ${mejor_periodo_row['ingresos']:,.0f} en ventas es un logro, pero la pregunta clave es: ¿a qué costo? Necesitamos que este nivel de ventas se traduzca en utilidad positiva."
+                - **Solidez/Liquidez:** Si la razón corriente es {mejor_periodo_row['razon_corriente']:.2f}, tu análisis debe ser: "⚠️ **Alerta Crítica de Liquidez:** Una Razón Corriente de {mejor_periodo_row['razon_corriente']:.2f} es insostenible y expone a la empresa a un riesgo severo de impago. Aunque haya sido 'mejor' que otros meses, este es nuestro talón de Aquiles y requiere acción inmediata."
+        4.  **Plan de Acción Prioritario (2-3 puntos):** Ofrece recomendaciones concretas y urgentes basadas en las debilidades detectadas, incluso en el "mejor" mes.
+        """
 
-            1.  **Control de Gastos:** Investigar las iniciativas de control de costos implementadas en {mejor_periodo_key} para convertirlas en políticas permanentes.
-            2.  **Mix de Ventas:** Analizar el mix de productos/servicios vendidos ese mes que pudo haber contribuido a mayores márgenes y potenciarlo en el futuro.
-            """
-            st.markdown(analisis_ia, unsafe_allow_html=True)
+        with st.spinner("El Asesor Financiero IA está preparando un análisis realista..."):
+            analisis_ia_realista = generar_analisis_avanzado_ia({}, pd.DataFrame(), mejor_periodo_key, prompt_mejor_periodo_realista)
+            st.markdown(analisis_ia_realista, unsafe_allow_html=True)
 
 
 # ==============================================================================
@@ -177,9 +192,9 @@ with tab3:
     st.header("💰 Análisis de Rentabilidad (DuPont)")
     st.markdown("""
     El análisis DuPont descompone el **Retorno sobre el Patrimonio (ROE)** en tres componentes clave para entender qué impulsa la rentabilidad:
-    1.  **Margen Neto:** Mide la eficiencia operativa.
-    2.  **Rotación de Activos:** Mide la eficiencia en el uso de los activos.
-    3.  **Apalancamiento Financiero:** Mide cómo el endeudamiento aumenta la rentabilidad.
+    1.  **Margen Neto:** Mide la eficiencia operativa (rentabilidad por venta).
+    2.  **Rotación de Activos:** Mide la eficiencia en el uso de los activos para generar ventas.
+    3.  **Apalancamiento Financiero:** Mide cómo el endeudamiento aumenta la rentabilidad de los accionistas.
     
     **Fórmula:** `ROE = Margen Neto * Rotación de Activos * Apalancamiento Financiero`
     """)
@@ -187,23 +202,26 @@ with tab3:
     periodo_dupont = st.selectbox("Selecciona el Periodo para el Análisis DuPont:", sorted_periods, key="periodo_dupont")
     kpis = datos_historicos[periodo_dupont]['kpis']['Todos']
     
-    activo_total = kpis['endeudamiento_activo'] and kpis['ingresos'] / kpis['endeudamiento_activo']
-    if kpis and activo_total:
-        rotacion_activos = kpis['ingresos'] / activo_total if activo_total else 0
-        apalancamiento = activo_total / (activo_total - (kpis.get('pasivo_total', activo_total * kpis['endeudamiento_activo']))) if activo_total and kpis.get('patrimonio') else 0
+    if kpis:
+        ingresos_dupont = kpis.get('ingresos', 0)
+        activo_total_dupont = kpis.get('activo', 0)
+        patrimonio_dupont = kpis.get('patrimonio', 0)
 
+        rotacion_activos = ingresos_dupont / activo_total_dupont if activo_total_dupont else 0
+        apalancamiento = activo_total_dupont / patrimonio_dupont if patrimonio_dupont else 0
+        
         st.subheader(f"Descomposición del ROE para {periodo_dupont}")
         
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("ROE (Resultado)", f"{kpis.get('roe', 0):.2%}")
-        col2.metric("Margen Neto", f"{kpis.get('margen_neto', 0):.2%}")
-        col3.metric("Rotación de Activos", f"{rotacion_activos:.2f}")
-        col4.metric("Apalancamiento", f"{apalancamiento:.2f}")
+        col2.metric("Margen Neto", f"{kpis.get('margen_neto', 0):.2%}", help="Utilidad Neta / Ventas")
+        col3.metric("Rotación de Activos", f"{rotacion_activos:.2f}", help="Ventas / Activo Total")
+        col4.metric("Apalancamiento", f"{apalancamiento:.2f}", help="Activo Total / Patrimonio")
         
-        st.info("Un ROE alto es sostenible si proviene de un buen margen y alta rotación. Si depende mucho del apalancamiento, el riesgo es mayor.")
+        st.info("Un ROE alto es más sostenible si proviene de un buen margen y una alta rotación. Si depende demasiado del apalancamiento, el riesgo financiero es mayor.")
 
 # ==============================================================================
-#                      PESTAÑA 4: Sugerencia - Salud Financiera
+#           PESTAÑA 4: Sugerencia - Salud Financiera (CON LÓGICA CORREGIDA)
 # ==============================================================================
 with tab4:
     st.header("🚑 Test Ácido y Ciclo de Conversión de Efectivo")
@@ -213,19 +231,20 @@ with tab4:
     kpis_salud = datos_historicos[periodo_salud]['kpis']['Todos']
 
     if kpis_salud:
-        bg_actual = datos_historicos[periodo_salud]['df_bg_master']
-        saldo_final_col = COL_CONFIG['BALANCE_GENERAL']['SALDO_FINAL']
-        cuenta_bg_col = COL_CONFIG['BALANCE_GENERAL']['CUENTA']
+        activo_corriente = kpis_salud.get('activo_corriente', 0)
+        inventario = kpis_salud.get('inventarios', 0)
+        pasivo_corriente = kpis_salud.get('pasivo_corriente', 0)
         
-        activo_corriente = kpis_salud.get('activo_corriente', get_principal_account_value(bg_actual, '1', saldo_final_col, cuenta_bg_col))
-        inventario = kpis_salud.get('inventarios', get_principal_account_value(bg_actual, '14', saldo_final_col, cuenta_bg_col))
-        pasivo_corriente = kpis_salud.get('pasivo_corriente', get_principal_account_value(bg_actual, '2', saldo_final_col, cuenta_bg_col))
-        
-        test_acido = (activo_corriente - inventario) / pasivo_corriente if pasivo_corriente else 0
+        test_acido = (activo_corriente - inventario) / pasivo_corriente if pasivo_corriente > 0 else 0
         
         st.subheader("Indicadores de Liquidez Inmediata")
         col1, col2 = st.columns(2)
         col1.metric("Razón Corriente", f"{kpis_salud.get('razon_corriente', 0):.2f}")
         col2.metric("Prueba Ácida (Quick Ratio)", f"{test_acido:.2f}", help="Mide la capacidad de pagar deudas a corto plazo sin depender de la venta de inventarios. Ideal > 1.")
         
-        st.info("La **Prueba Ácida** es un indicador más estricto de la liquidez. Si es mucho menor que la Razón Corriente, significa que la empresa depende fuertemente de sus inventarios.")
+        if test_acido < 1:
+            st.warning(f"**Atención:** Un Test Ácido de {test_acido:.2f} es bajo. Indica que sin vender los inventarios, la empresa podría tener dificultades para cubrir sus obligaciones más urgentes. La dependencia del inventario es alta.")
+        else:
+            st.success(f"**Buena señal:** Un Test Ácido de {test_acido:.2f} es saludable. Muestra que la empresa tiene suficientes activos líquidos para operar con tranquilidad a corto plazo, incluso sin contar con la venta de su inventario.")
+
+        st.info("La **Prueba Ácida** es un indicador más estricto de la liquidez. Si es mucho menor que la Razón Corriente, significa que la empresa depende fuertemente de sus inventarios para mantenerse a flote.")
