@@ -69,6 +69,14 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     inventarios = get_principal_account_value(df_bg, '14', saldo_final_col, cuenta_bg)
     pasivo_corriente = sum([get_principal_account_value(df_bg, c, saldo_final_col, cuenta_bg) for c in ['21','22','23']])
 
+    # --- Enriquecer el diccionario de KPIs ---
+    kpis['activo'] = activo
+    kpis['pasivo'] = pasivo
+    kpis['patrimonio'] = patrimonio
+    kpis['activo_corriente'] = activo_corriente
+    kpis['pasivo_corriente'] = pasivo_corriente
+    kpis['inventarios'] = inventarios
+    
     kpis['razon_corriente'] = activo_corriente / pasivo_corriente if pasivo_corriente != 0 else 0
     kpis['endeudamiento_activo'] = pasivo / activo if activo != 0 else 0
     kpis['roe'] = utilidad_neta / patrimonio if patrimonio != 0 else 0
@@ -91,58 +99,62 @@ def preparar_datos_tendencia(datos_historicos: dict) -> pd.DataFrame:
     return df_tendencia
 
 @st.cache_data(show_spinner=False)
-def generar_analisis_avanzado_ia(_kpis_actuales: dict, _df_er_actual: pd.DataFrame, nombre_cc: str, periodo_actual: str):
-    """Genera un análisis financiero profundo para un periodo único."""
+def generar_analisis_avanzado_ia(_kpis_actuales: dict, _df_er_actual: pd.DataFrame, nombre_cc: str, prompt_personalizado: str):
+    """Genera un análisis financiero profundo para un periodo único o una comparación, usando un prompt flexible."""
     try:
         api_key = st.secrets["google_ai"]["api_key"]
         genai.configure(api_key=api_key)
     except Exception:
         return "🔴 **Error:** No se encontró la clave de API de Google AI."
 
-    er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
-    cuenta_col_er = er_conf.get('CUENTA', 'Cuenta')
-    nombre_col_er = er_conf.get('NOMBRE_CUENTA', 'Título')
-    
-    gastos_df = _df_er_actual[_df_er_actual.get(cuenta_col_er, pd.Series(dtype=str)).str.startswith(('5', '7'), na=False)].copy()
+    # Si no se provee un prompt personalizado, se genera uno por defecto.
+    if "Rol:" not in prompt_personalizado:
+        er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
+        cuenta_col_er = er_conf.get('CUENTA', 'Cuenta')
+        nombre_col_er = er_conf.get('NOMBRE_CUENTA', 'Título')
+        
+        gastos_df = _df_er_actual[_df_er_actual.get(cuenta_col_er, pd.Series(dtype=str)).str.startswith(('5', '7'), na=False)].copy()
 
-    val_col = ''
-    if nombre_cc != 'Todos' and nombre_cc in gastos_df.columns:
-        val_col = nombre_cc
-    elif 'Total_Consolidado_ER' in gastos_df.columns:
-        val_col = 'Total_Consolidado_ER'
+        val_col = ''
+        if nombre_cc != 'Todos' and nombre_cc in gastos_df.columns:
+            val_col = nombre_cc
+        elif 'Total_Consolidado_ER' in gastos_df.columns:
+            val_col = 'Total_Consolidado_ER'
+        else:
+            ind_cc_cols = [v for k, v in er_conf.get('CENTROS_COSTO_COLS',{}).items() if str(k).lower() not in ['total', 'sin centro de coste'] and v in gastos_df.columns]
+            if ind_cc_cols:
+                gastos_df['__temp_sum_gastos'] = gastos_df[ind_cc_cols].sum(axis=1)
+                val_col = '__temp_sum_gastos'
+
+        top_5_gastos_str = "No se pudieron determinar los gastos principales."
+        if val_col and nombre_col_er in gastos_df.columns and val_col in gastos_df.columns:
+            gastos_df_filtered = gastos_df[[nombre_col_er, val_col]].dropna()
+            gastos_df_filtered[val_col] = pd.to_numeric(gastos_df_filtered[val_col], errors='coerce').abs()
+            top_5_gastos = gastos_df_filtered.nlargest(5, val_col)
+            top_5_gastos_str = "\n".join([f"- {row.iloc[0]}: ${row.iloc[1]:,.0f}" for _, row in top_5_gastos.iterrows()])
+        
+        prompt = f"""
+        **Rol:** Actúa como un Asesor Financiero Estratégico.
+        **Contexto:** Estás analizando los resultados del centro de costo: "{nombre_cc}" para el periodo: "{prompt_personalizado}".
+        **Datos Financieros Clave:**
+        - Ingresos: ${_kpis_actuales.get('ingresos', 0):,.0f}
+        - Utilidad Neta: ${_kpis_actuales.get('utilidad_neta', 0):,.0f}
+        - Margen Neto: {_kpis_actuales.get('margen_neto', 0):.2%}
+        - ROE: {_kpis_actuales.get('roe', 0):.2%}
+        - Razón Corriente: {_kpis_actuales.get('razon_corriente', 0):.2f}
+        - Endeudamiento: {_kpis_actuales.get('endeudamiento_activo', 0):.2%}
+        **Top 5 Gastos Operativos:**
+        {top_5_gastos_str}
+        **Instrucciones:** Tu respuesta debe ser un informe gerencial profesional. Usa emojis (ej: 📈, ⚠️, ✅, 💡).
+        ### Diagnóstico General 🎯
+        (Veredicto claro sobre la salud financiera.)
+        ### Puntos Clave del Periodo 🔑
+        (Implicación de negocio de Rentabilidad, Costos y Solvencia.)
+        ### Plan de Acción Recomendado 💡
+        (2-3 recomendaciones específicas y accionables.)
+        """
     else:
-        ind_cc_cols = [v for k, v in er_conf.get('CENTROS_COSTO_COLS',{}).items() if str(k).lower() not in ['total', 'sin centro de coste'] and v in gastos_df.columns]
-        if ind_cc_cols:
-            gastos_df['__temp_sum_gastos'] = gastos_df[ind_cc_cols].sum(axis=1)
-            val_col = '__temp_sum_gastos'
-
-    top_5_gastos_str = "No se pudieron determinar los gastos principales."
-    if val_col and nombre_col_er in gastos_df.columns and val_col in gastos_df.columns:
-        gastos_df_filtered = gastos_df[[nombre_col_er, val_col]].dropna()
-        gastos_df_filtered[val_col] = pd.to_numeric(gastos_df_filtered[val_col], errors='coerce').abs()
-        top_5_gastos = gastos_df_filtered.nlargest(5, val_col)
-        top_5_gastos_str = "\n".join([f"- {row.iloc[0]}: ${row.iloc[1]:,.0f}" for _, row in top_5_gastos.iterrows()])
-
-    prompt = f"""
-    **Rol:** Actúa como un Asesor Financiero Estratégico y un experto en comunicación para la alta gerencia. Tu objetivo es transformar datos crudos en un informe gerencial claro, conciso y visualmente atractivo que impulse la toma de decisiones.
-    **Contexto:** Estás analizando los resultados del centro de costo: "{nombre_cc}" para el periodo: "{periodo_actual}".
-    **Datos Financieros Clave:**
-    - Ingresos: ${_kpis_actuales.get('ingresos', 0):,.0f}
-    - Utilidad Neta: ${_kpis_actuales.get('utilidad_neta', 0):,.0f}
-    - Margen Neto: {_kpis_actuales.get('margen_neto', 0):.2%}
-    - ROE: {_kpis_actuales.get('roe', 0):.2%}
-    - Razón Corriente: {_kpis_actuales.get('razon_corriente', 0):.2f}
-    - Endeudamiento: {_kpis_actuales.get('endeudamiento_activo', 0):.2%}
-    **Top 5 Gastos Operativos:**
-    {top_5_gastos_str}
-    **Instrucciones:** Tu respuesta debe ser un informe gerencial profesional, fácil de leer y visualmente organizado. Usa emojis (ej: 📈, ⚠️, ✅, 💡) para enfatizar puntos. La estructura debe ser:
-    ### Diagnóstico General 🎯
-    (Veredicto claro y directo sobre la salud financiera.)
-    ### Puntos Clave del Periodo 🔑
-    (Lista con la implicación de negocio de la Rentabilidad, Costos y Solvencia.)
-    ### Plan de Acción Recomendado 💡
-    (Lista de 2-3 recomendaciones específicas y accionables.)
-    """
+        prompt = prompt_personalizado
 
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
