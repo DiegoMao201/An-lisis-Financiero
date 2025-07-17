@@ -77,12 +77,24 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     kpis['pasivo_corriente'] = pasivo_corriente
     kpis['inventarios'] = inventarios
     
+    # --- CÁLCULOS DE RATIOS CORREGIDOS ---
     kpis['razon_corriente'] = activo_corriente / pasivo_corriente if pasivo_corriente != 0 else 0
     kpis['endeudamiento_activo'] = pasivo / activo if activo != 0 else 0
-    kpis['roe'] = utilidad_neta / patrimonio if patrimonio != 0 else 0
-    kpis['margen_neto'] = utilidad_neta / ingresos if ingresos > 0 else 0
-    kpis['margen_operacional'] = utilidad_operacional / ingresos if ingresos > 0 else 0
     
+    # ROE: Usar abs() en utilidad_neta para asegurar un resultado positivo.
+    kpis['roe'] = abs(utilidad_neta) / patrimonio if patrimonio != 0 else 0
+    
+    # Márgenes: utilidad e ingresos son negativos, la división ya da un resultado positivo. No se necesita abs().
+    kpis['margen_neto'] = utilidad_neta / ingresos if ingresos != 0 else 0
+    kpis['margen_operacional'] = utilidad_operacional / ingresos if ingresos != 0 else 0
+    
+    # KPIs para DuPont (deben ser positivos)
+    kpis['rotacion_activos'] = abs(ingresos) / activo if activo != 0 else 0
+    kpis['apalancamiento'] = activo / patrimonio if patrimonio != 0 else 0
+
+    if '__temp_sum_kpi' in df_er.columns:
+        df_er.drop(columns=['__temp_sum_kpi'], inplace=True)
+        
     return kpis
 
 def preparar_datos_tendencia(datos_historicos: dict) -> pd.DataFrame:
@@ -99,62 +111,60 @@ def preparar_datos_tendencia(datos_historicos: dict) -> pd.DataFrame:
     return df_tendencia
 
 @st.cache_data(show_spinner=False)
-def generar_analisis_avanzado_ia(_kpis_actuales: dict, _df_er_actual: pd.DataFrame, nombre_cc: str, prompt_personalizado: str):
-    """Genera un análisis financiero profundo para un periodo único o una comparación, usando un prompt flexible."""
+def generar_analisis_avanzado_ia(contexto_ia: dict):
+    """Genera un análisis financiero profundo usando un contexto enriquecido."""
     try:
         api_key = st.secrets["google_ai"]["api_key"]
         genai.configure(api_key=api_key)
     except Exception:
         return "🔴 **Error:** No se encontró la clave de API de Google AI."
 
-    # Si no se provee un prompt personalizado, se genera uno por defecto.
-    if "Rol:" not in prompt_personalizado:
-        er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
-        cuenta_col_er = er_conf.get('CUENTA', 'Cuenta')
-        nombre_col_er = er_conf.get('NOMBRE_CUENTA', 'Título')
-        
-        gastos_df = _df_er_actual[_df_er_actual.get(cuenta_col_er, pd.Series(dtype=str)).str.startswith(('5', '7'), na=False)].copy()
+    # Extraemos los datos del contexto
+    kpis = contexto_ia.get("kpis", {})
+    periodo = contexto_ia.get("periodo", "N/A")
+    cc = contexto_ia.get("centro_costo", "N/A")
+    convencion = contexto_ia.get("convencion_contable", "")
+    favorables = contexto_ia.get("variaciones_favorables", [])
+    desfavorables = contexto_ia.get("variaciones_desfavorables", [])
 
-        val_col = ''
-        if nombre_cc != 'Todos' and nombre_cc in gastos_df.columns:
-            val_col = nombre_cc
-        elif 'Total_Consolidado_ER' in gastos_df.columns:
-            val_col = 'Total_Consolidado_ER'
-        else:
-            ind_cc_cols = [v for k, v in er_conf.get('CENTROS_COSTO_COLS',{}).items() if str(k).lower() not in ['total', 'sin centro de coste'] and v in gastos_df.columns]
-            if ind_cc_cols:
-                gastos_df['__temp_sum_gastos'] = gastos_df[ind_cc_cols].sum(axis=1)
-                val_col = '__temp_sum_gastos'
+    # Formateamos las variaciones para el prompt
+    fav_str = "\n".join([f"- {item['Descripción']}: ${item['Variacion_Absoluta']:,.0f}" for item in favorables]) if favorables else "No hubo variaciones favorables significativas."
+    des_str = "\n".join([f"- {item['Descripción']}: ${item['Variacion_Absoluta']:,.0f}" for item in desfavorables]) if desfavorables else "No hubo variaciones desfavorables significativas."
 
-        top_5_gastos_str = "No se pudieron determinar los gastos principales."
-        if val_col and nombre_col_er in gastos_df.columns and val_col in gastos_df.columns:
-            gastos_df_filtered = gastos_df[[nombre_col_er, val_col]].dropna()
-            gastos_df_filtered[val_col] = pd.to_numeric(gastos_df_filtered[val_col], errors='coerce').abs()
-            top_5_gastos = gastos_df_filtered.nlargest(5, val_col)
-            top_5_gastos_str = "\n".join([f"- {row.iloc[0]}: ${row.iloc[1]:,.0f}" for _, row in top_5_gastos.iterrows()])
-        
-        prompt = f"""
-        **Rol:** Actúa como un Asesor Financiero Estratégico.
-        **Contexto:** Estás analizando los resultados del centro de costo: "{nombre_cc}" para el periodo: "{prompt_personalizado}".
-        **Datos Financieros Clave:**
-        - Ingresos: ${_kpis_actuales.get('ingresos', 0):,.0f}
-        - Utilidad Neta: ${_kpis_actuales.get('utilidad_neta', 0):,.0f}
-        - Margen Neto: {_kpis_actuales.get('margen_neto', 0):.2%}
-        - ROE: {_kpis_actuales.get('roe', 0):.2%}
-        - Razón Corriente: {_kpis_actuales.get('razon_corriente', 0):.2f}
-        - Endeudamiento: {_kpis_actuales.get('endeudamiento_activo', 0):.2%}
-        **Top 5 Gastos Operativos:**
-        {top_5_gastos_str}
-        **Instrucciones:** Tu respuesta debe ser un informe gerencial profesional. Usa emojis (ej: 📈, ⚠️, ✅, 💡).
-        ### Diagnóstico General 🎯
-        (Veredicto claro sobre la salud financiera.)
-        ### Puntos Clave del Periodo 🔑
-        (Implicación de negocio de Rentabilidad, Costos y Solvencia.)
-        ### Plan de Acción Recomendado 💡
-        (2-3 recomendaciones específicas y accionables.)
-        """
-    else:
-        prompt = prompt_personalizado
+    prompt = f"""
+    **Rol:** Actúa como un Asesor Financiero Estratégico y CFO virtual. Tu análisis debe ser agudo, directo y accionable.
+
+    **¡REGLA DE ORO PARA EL ANÁLISIS!** {convencion}
+
+    **Contexto de Análisis:**
+    - **Periodo:** {periodo}
+    - **Centro de Costo / Unidad de Negocio:** "{cc}"
+
+    **Indicadores Clave (KPIs) del Periodo:**
+    - **Utilidad Neta:** ${kpis.get('utilidad_neta', 0):,.0f}
+    - **Margen Neto:** {kpis.get('margen_neto', 0):.2%}
+    - **ROE (Rentabilidad sobre Patrimonio):** {kpis.get('roe', 0):.2%}
+    - **Razón Corriente (Liquidez):** {kpis.get('razon_corriente', 0):.2f}
+    - **Nivel de Endeudamiento:** {kpis.get('endeudamiento_activo', 0):.2%}
+
+    **Análisis Comparativo vs. Periodo Anterior:**
+    - **Principales Impactos Positivos (que ayudaron a la utilidad):**
+    {fav_str}
+    - **Principales Impactos Negativos (que perjudicaron la utilidad):**
+    {des_str}
+
+    **Instrucciones:**
+    Con base en TODA la información anterior, genera un informe ejecutivo conciso. Usa emojis para resaltar puntos (ej: 📈, ⚠️, ✅, 💡). La estructura debe ser:
+
+    ### Diagnóstico General 🎯
+    (Ofrece un veredicto claro y directo sobre la salud financiera para este centro de costo en este periodo. ¿Fue un buen o mal periodo y por qué?)
+
+    ### Puntos Clave del Análisis 🔑
+    (En una lista, detalla las 3 observaciones más importantes. Conecta los KPIs con las variaciones. Por ejemplo: "La caída en el margen neto se explica principalmente por el aumento inesperado en [Gasto X], como se ve en los impactos negativos.")
+
+    ### Plan de Acción Recomendado 💡
+    (Proporciona 2 o 3 recomendaciones específicas, prácticas y accionables basadas en tu diagnóstico para mejorar los resultados en el siguiente periodo.)
+    """
 
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
@@ -173,6 +183,9 @@ def generar_analisis_tendencia_ia(_df_tendencia: pd.DataFrame):
     except Exception:
         return "🔴 **Error:** No se encontró la clave de API de Google AI."
 
+    if _df_tendencia.empty or len(_df_tendencia) < 2:
+        return "ℹ️ Se necesitan al menos dos periodos para un análisis de tendencia."
+
     primer_periodo = _df_tendencia.iloc[0]
     ultimo_periodo = _df_tendencia.iloc[-1]
     
@@ -188,17 +201,27 @@ def generar_analisis_tendencia_ia(_df_tendencia: pd.DataFrame):
 
     prompt = f"""
     **Rol:** Eres un Analista Financiero Senior y Asesor Estratégico presentando un informe de evolución de negocio a un comité directivo. Tu análisis debe ser agudo, orientado a la acción y fácil de entender.
+
+    **¡NOTACIÓN CONTABLE CRÍTICA!** Para tu análisis, ten en cuenta esta regla de oro:
+    - **Valores NEGATIVOS en Ingresos y Utilidades son FAVORABLES (representan ganancias).**
+    - **Valores POSITIVOS en Gastos y Costos son DESFAVORABLES.**
+    - Ejemplo de interpretación: Si la utilidad neta evoluciona de -500 a -600, es una **MEJORA** en la rentabilidad. Si un gasto evoluciona de 100 a 80, es una **MEJORA** en la eficiencia.
+
     **Contexto:** Has analizado la evolución financiera consolidada de la compañía durante varios periodos. Aquí está el resumen de la trayectoria:
     {resumen_datos}
+    
     **Instrucciones de Formato y Contenido:**
     Tu respuesta debe ser un informe de evolución de alto nivel, visualmente organizado con Markdown y emojis (📈, 📉, ⚠️, ✅, 💡). La estructura debe ser la siguiente:
+    
     ### Veredicto Estratégico 📜
-    (En un párrafo, da un veredicto sobre la trayectoria general de la compañía. ¿La tendencia es positiva y sostenible, muestra signos de estancamiento, o hay señales de alerta preocupantes? Justifica tu conclusión.)
+    (En un párrafo, da un veredicto sobre la trayectoria general de la compañía. ¿La tendencia es positiva y sostenible, muestra signos de estancamiento, o hay señales de alerta preocupantes? Justifica tu conclusión basándote en la regla de notación contable.)
+    
     ### Análisis de Evolución por Área 🔍
-    (Presenta un análisis en formato de lista. Para cada área, describe la tendencia observada y su implicación estratégica.)
-    - **Crecimiento y Rentabilidad:** ¿El crecimiento de los ingresos se traduce en una mayor rentabilidad (margen neto, ROE)? ¿O están creciendo los ingresos a costa de los márgenes?
+    (Presenta un análisis en formato de lista. Para cada área, describe la tendencia observada y su implicación estratégica, siempre interpretando los signos correctamente.)
+    - **Crecimiento y Rentabilidad:** ¿El crecimiento de los ingresos (valores negativos más grandes) se traduce en una mayor rentabilidad (utilidad neta negativa más grande y márgenes positivos más altos)? ¿O están creciendo los ingresos a costa de los márgenes?
     - **Eficiencia Operativa:** ¿Cómo ha evolucionado la relación entre ingresos y gastos operativos a lo largo del tiempo? ¿La empresa se está volviendo más o menos eficiente?
     - **Salud y Riesgo Financiero:** ¿La posición de liquidez (Razón Corriente) ha mejorado o empeorado? ¿El nivel de endeudamiento es sostenible o representa un riesgo creciente?
+    
     ### Prioridades para el Próximo Trimestre 🎯
     (Basado en la evolución, proporciona una lista de 2 a 3 prioridades estratégicas y accionables que la dirección debería enfocarse en los próximos 3 meses.)
     """
