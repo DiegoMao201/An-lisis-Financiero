@@ -18,8 +18,8 @@ def calcular_analisis_vertical(df_estado_financiero: pd.DataFrame, valor_col: st
     if valor_base == 0:
         df_analisis['Análisis Vertical (%)'] = 0.0
     else:
-        # Calcular el porcentaje para cada cuenta
-        df_analisis['Análisis Vertical (%)'] = (df_analisis[valor_col] / valor_base) * 100
+        # CORRECCIÓN: Calcular el porcentaje usando valores absolutos para un resultado estándar y positivo.
+        df_analisis['Análisis Vertical (%)'] = (df_analisis[valor_col].abs() / abs(valor_base)) * 100
     
     return df_analisis
 
@@ -47,6 +47,7 @@ def calcular_analisis_horizontal(df_actual: pd.DataFrame, df_anterior: pd.DataFr
     df_comparativo['Variación Absoluta'] = df_comparativo['Valor Actual'] - df_comparativo['Valor Anterior']
     
     # Evitar división por cero
+    # El uso de .abs() en el denominador es correcto para manejar la notación.
     df_comparativo['Variación Relativa (%)'] = (
         (df_comparativo['Variación Absoluta'] / df_comparativo['Valor Anterior'].abs()) * 100
     ).replace([float('inf'), -float('inf')], 100).fillna(0)
@@ -57,6 +58,7 @@ def construir_flujo_de_caja(df_er: pd.DataFrame, df_bg_actual: pd.DataFrame, df_
     """Construye un estado de flujo de caja simplificado (Método Indirecto)."""
     
     # 1. Utilidad Neta (Punto de partida)
+    # Asumiendo que la utilidad ya viene con el signo correcto (negativo si es ganancia)
     utilidad_neta = get_principal_account_value(df_er, '59', val_col_er, cuenta_er) # Asumiendo 59 como utilidad neta
     if utilidad_neta == 0: # Si no está la 59, la calculamos
         ingresos = get_principal_account_value(df_er, '4', val_col_er, cuenta_er)
@@ -65,28 +67,38 @@ def construir_flujo_de_caja(df_er: pd.DataFrame, df_bg_actual: pd.DataFrame, df_
         utilidad_neta = ingresos + costos + gastos_op
 
     # 2. Ajustes de partidas que no son efectivo (Depreciación)
+    # La depreciación es un gasto (positivo), se debe sumar para revertir el efecto.
+    # En la fórmula contable estándar se suma, y aquí nuestra utilidad es negativa, por lo que el cálculo es: -Utilidad + Depreciacion
+    # Por lo tanto, debemos cambiar el signo de la utilidad para el cálculo del flujo de caja.
+    utilidad_para_flujo = -utilidad_neta 
     depreciacion = get_principal_account_value(df_er, '5160', val_col_er, cuenta_er) # Típicamente en gastos adm.
 
     # 3. Cambios en Capital de Trabajo
     def get_variacion(cuenta, df_act, df_ant):
         val_act = get_principal_account_value(df_act, cuenta, saldo_final_bg, cuenta_bg)
         val_ant = get_principal_account_value(df_ant, cuenta, saldo_final_bg, cuenta_bg)
-        return val_ant - val_act # (Anterior - Actual) para activos, (Actual - Anterior) para pasivos
+        return val_act - val_ant # (Actual - Anterior)
 
+    # Aumento de activo (Cuentas por cobrar) disminuye el efectivo -> Restar la variación
     var_cuentas_cobrar = get_variacion('13', df_bg_actual, df_bg_anterior)
+    # Aumento de activo (Inventarios) disminuye el efectivo -> Restar la variación
     var_inventarios = get_variacion('14', df_bg_actual, df_bg_anterior)
-    var_proveedores = -1 * get_variacion('22', df_bg_actual, df_bg_anterior) # Invertimos la lógica para pasivos
+    # Aumento de pasivo (Proveedores) aumenta el efectivo -> Sumar la variación
+    var_proveedores = get_variacion('22', df_bg_actual, df_bg_anterior)
 
     # Flujo de Efectivo de Operaciones
-    fco = utilidad_neta + depreciacion + var_cuentas_cobrar + var_inventarios + var_proveedores
+    fco = utilidad_para_flujo + depreciacion - var_cuentas_cobrar - var_inventarios + var_proveedores
 
     # 4. Flujo de Efectivo de Inversión (simplificado)
+    # Aumento de Activos Fijos es una salida de efectivo
     var_activos_fijos = get_variacion('15', df_bg_actual, df_bg_anterior) # Compra/Venta de Activos Fijos
-    fci = var_activos_fijos
+    fci = -var_activos_fijos
 
     # 5. Flujo de Efectivo de Financiación (simplificado)
-    var_obligaciones = -1 * get_variacion('21', df_bg_actual, df_bg_anterior)
-    var_capital_social = -1 * get_variacion('31', df_bg_actual, df_bg_anterior)
+    # Aumento de deuda es una entrada de efectivo
+    var_obligaciones = get_variacion('21', df_bg_actual, df_bg_anterior)
+    # Aumento de capital es una entrada de efectivo
+    var_capital_social = get_variacion('31', df_bg_actual, df_bg_anterior)
     fcf = var_obligaciones + var_capital_social
 
     # Flujo de caja total
@@ -97,15 +109,15 @@ def construir_flujo_de_caja(df_er: pd.DataFrame, df_bg_actual: pd.DataFrame, df_
     # Crear DataFrame
     data = {
         'Concepto': [
-            'Utilidad Neta', ' (+) Depreciación y Amortización', 'Variación Cuentas por Cobrar', 'Variación Inventarios',
-            'Variación Proveedores', '**Flujo de Efectivo de Operación (FCO)**',
-            'Variación Activos Fijos (Inversión)', '**Flujo de Efectivo de Inversión (FCI)**',
-            'Variación Obligaciones Financieras', 'Variación Capital Social', '**Flujo de Efectivo de Financiación (FCF)**',
+            'Utilidad Neta del Periodo', ' (+) Depreciación y Amortización', '(-) Aumento en Cuentas por Cobrar', '(-) Aumento en Inventarios',
+            '(+) Aumento en Proveedores', '**Flujo de Efectivo de Operación (FCO)**',
+            '(-) Compra Neta de Activos Fijos (Inversión)', '**Flujo de Efectivo de Inversión (FCI)**',
+            '(+) Aumento en Obligaciones Financieras', '(+) Aumento en Capital Social', '**Flujo de Efectivo de Financiación (FCF)**',
             '**Flujo Neto de Efectivo del Periodo**', 'Saldo Inicial de Efectivo', '**Saldo Final de Efectivo**'
         ],
         'Valor': [
-            utilidad_neta, depreciacion, var_cuentas_cobrar, var_inventarios, var_proveedores, fco,
-            var_activos_fijos, fci, var_obligaciones, var_capital_social, fcf,
+            utilidad_para_flujo, depreciacion, -var_cuentas_cobrar, -var_inventarios, var_proveedores, fco,
+            -var_activos_fijos, fci, var_obligaciones, var_capital_social, fcf,
             flujo_neto, saldo_inicial_caja, saldo_final_caja
         ]
     }
