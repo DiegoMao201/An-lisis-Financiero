@@ -88,7 +88,7 @@ def calcular_variaciones_er(df_actual: pd.DataFrame, df_previo: pd.DataFrame, cc
     else:
         # El centro de costo NO existe en el periodo previo (ej. tienda nueva).
         # Se notifica al usuario y se crea un DataFrame compatible con valor 0.
-        st.warning(f"El centro de costo '{valor_col_nombre}' no se encontró en el periodo anterior. Se asumirán valores de cero para el comparativo.")
+        st.warning(f"ADVERTENCIA: El centro de costo '{valor_col_nombre}' no se encontró en el periodo anterior. Se asumirán valores de cero para el comparativo.")
         df2 = df_previo[[cuenta_col, desc_col]].copy()
         df2['Valor_previo'] = 0
 
@@ -109,7 +109,6 @@ def plot_waterfall_utilidad_neta(df_variacion: pd.DataFrame, periodo_actual: str
     cuenta_col = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('CUENTA', 'Cuenta')
     
     # Obtener totales de utilidad neta de la manera correcta.
-    # Se suman todos los efectos del estado de resultados.
     utilidad_neta_actual = df_variacion['Valor_actual'].sum()
     utilidad_neta_previa = df_variacion['Valor_previo'].sum()
 
@@ -330,7 +329,7 @@ else:
     df_variacion_er = None
     if data_previa:
         df_variacion_er = calcular_variaciones_er(df_er_actual, data_previa['df_er_master'], cc_filter)
-        if not df_variacion_er.empty:
+        if df_variacion_er is not None and not df_variacion_er.empty:
             st.info(f"Análisis comparativo contra el periodo **{periodo_previo}**.")
     else:
         st.warning("No hay un periodo anterior para realizar análisis comparativo.")
@@ -467,14 +466,20 @@ else:
             
             # Aplicar formato condicional
             def format_dupont(df):
-                styled_df = df.style.format({
-                    periodo_actual: lambda x: f'{x:.2%}' if abs(x) < 1 else f'{x:.2f}x',
-                    periodo_previo: lambda x: f'{x:.2%}' if abs(x) < 1 else f'{x:.2f}x',
-                    'Variación': lambda x: f'{x:+.2%}' if abs(x) < 1 else f'{x:+.2f}x'
-                }).background_gradient(cmap='RdYlGn', subset=['Variación'], low=0.4, high=0.4)
-                return styled_df
+                # Crear copia para no modificar el original
+                df_display = df.copy()
+                # Aplicar formato a las columnas
+                df_display[periodo_actual] = df_display[periodo_actual].apply(lambda x: f'{x:.2%}' if 'Margen' in df_display.loc[x.name, 'Componente'] or 'ROE' in df_display.loc[x.name, 'Componente'] else f'{x:.2f}x')
+                df_display[periodo_previo] = df_display[periodo_previo].apply(lambda x: f'{x:.2%}' if 'Margen' in df_display.loc[x.name, 'Componente'] or 'ROE' in df_display.loc[x.name, 'Componente'] else f'{x:.2f}x')
+                df_display['Variación'] = df_display['Variación'].apply(lambda x: f'{x:+.2%}' if 'Margen' in df_display.loc[x.name, 'Componente'] or 'ROE' in df_display.loc[x.name, 'Componente'] else f'{x:+.2f}x')
                 
-            st.dataframe(format_dupont(df_dupont), use_container_width=True)
+                return df_display.style.background_gradient(cmap='RdYlGn', subset=['Variación'], low=0.4, high=0.4)
+                
+            st.dataframe(df_dupont.style.format({
+                periodo_actual: '{:.2%}',
+                periodo_previo: '{:.2%}',
+                'Variación': '{:+.2%}',
+            }).background_gradient(cmap='RdYlGn', subset=['Variación'], low=0.4, high=0.4), use_container_width=True)
 
         else:
             st.info("Se requiere un periodo anterior para el análisis DuPont comparativo.")
@@ -490,7 +495,7 @@ else:
         df_bg_display = generate_financial_statement(df_bg_actual, 'Balance General', 99) # BG no tiene nivel
         st.dataframe(df_bg_display.style.format({'Valor': "${:,.0f}"}), use_container_width=True, height=600)
 
-    # --- Funcionalidad de Búsqueda y Descarga (sin cambios, pero ahora al final) ---
+    # --- Funcionalidad de Búsqueda y Descarga ---
     if search_account_input:
         st.markdown("---")
         with st.expander(f"Resultado de la búsqueda para cuentas que inician con '{search_account_input}'", expanded=True):
