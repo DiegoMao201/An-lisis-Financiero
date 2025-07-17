@@ -62,54 +62,75 @@ def plot_sparkline(data: pd.Series, title: str, is_percent: bool = False, lower_
 def calcular_variaciones_er(df_actual: pd.DataFrame, df_previo: pd.DataFrame, cc_filter: str) -> pd.DataFrame:
     """
     Calcula las variaciones absolutas y porcentuales entre dos periodos para el Estado de Resultados.
+    VERSIÓN CORREGIDA para manejar centros de costo que no existen en el periodo previo.
     """
     cuenta_col = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('CUENTA', 'Cuenta')
     desc_col = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('DESCRIPCION_CUENTA', 'Descripción')
     
-    # Determinar la columna de valor según el centro de costo
-    valor_col_actual = 'Total_Consolidado_ER' if cc_filter == 'Todos' else cc_filter
-    valor_col_previo = 'Total_Consolidado_ER' if cc_filter == 'Todos' else cc_filter
+    # Determinar el nombre de la columna de valor según el filtro
+    valor_col_nombre = 'Total_Consolidado_ER' if cc_filter == 'Todos' else cc_filter
 
-    df1 = df_actual[[cuenta_col, desc_col, valor_col_actual]].copy()
-    df2 = df_previo[[cuenta_col, desc_col, valor_col_previo]].copy()
+    # --- Procesar DataFrame Actual ---
+    # Se asume que la columna siempre existe en el DF actual, ya que el filtro se basa en él.
+    # Por seguridad, verificamos que no falte.
+    if valor_col_nombre not in df_actual.columns:
+        st.error(f"Error Interno: La columna '{valor_col_nombre}' no se encontró en los datos del periodo actual.")
+        return pd.DataFrame() # Devolver un DF vacío para evitar que la app se caiga.
+        
+    df1 = df_actual[[cuenta_col, desc_col, valor_col_nombre]].copy()
+    df1.rename(columns={valor_col_nombre: 'Valor_actual'}, inplace=True)
 
-    df_variacion = pd.merge(df1, df2, on=[cuenta_col, desc_col], how='outer', suffixes=('_actual', '_previo'))
+    # --- Procesar DataFrame Previo (Lógica de corrección clave) ---
+    if valor_col_nombre in df_previo.columns:
+        # El centro de costo SÍ existe en el periodo previo, se procesa normalmente.
+        df2 = df_previo[[cuenta_col, desc_col, valor_col_nombre]].copy()
+        df2.rename(columns={valor_col_nombre: 'Valor_previo'}, inplace=True)
+    else:
+        # El centro de costo NO existe en el periodo previo (ej. tienda nueva).
+        # Se notifica al usuario y se crea un DataFrame compatible con valor 0.
+        st.warning(f"El centro de costo '{valor_col_nombre}' no se encontró en el periodo anterior. Se asumirán valores de cero para el comparativo.")
+        df2 = df_previo[[cuenta_col, desc_col]].copy()
+        df2['Valor_previo'] = 0
+
+    # El merge ahora es seguro y robusto
+    df_variacion = pd.merge(df1, df2, on=[cuenta_col, desc_col], how='outer')
+    
+    # Rellenamos con cero cualquier cuenta que exista en un periodo pero no en el otro
     df_variacion.fillna(0, inplace=True)
-    
-    df_variacion['Variacion_Absoluta'] = df_variacion[f'{valor_col_actual}_actual'] - df_variacion[f'{valor_col_previo}_previo']
-    
-    # La variación es favorable si disminuye (más negativa o menos positiva)
-    # Recordar: Ingresos son negativos, Gastos son positivos.
-    # Un aumento en ingresos (p.e. de -100 a -120) tiene una variación de -20 (favorable).
-    # Una disminución en gastos (p.e. de 50 a 40) tiene una variación de -10 (favorable).
-    # Por lo tanto, una Variacion_Absoluta negativa siempre es FAVORABLE.
+
+    # Cálculo final de la variación
+    df_variacion['Variacion_Absoluta'] = df_variacion['Valor_actual'] - df_variacion['Valor_previo']
     
     return df_variacion
+
 
 def plot_waterfall_utilidad_neta(df_variacion: pd.DataFrame, periodo_actual: str, periodo_previo: str):
     """Crea un gráfico de cascada para explicar la variación de la Utilidad Neta."""
     cuenta_col = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('CUENTA', 'Cuenta')
-    desc_col = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('DESCRIPCION_CUENTA', 'Descripción')
     
-    # Obtener totales de utilidad neta
-    utilidad_neta_actual = df_variacion[df_variacion[cuenta_col].str.startswith('4') | df_variacion[cuenta_col].str.startswith('5') | df_variacion[cuenta_col].str.startswith('6')]['Valor_actual'].sum()
-    utilidad_neta_previa = df_variacion[df_variacion[cuenta_col].str.startswith('4') | df_variacion[cuenta_col].str.startswith('5') | df_variacion[cuenta_col].str.startswith('6')]['Valor_previo'].sum()
+    # Obtener totales de utilidad neta de la manera correcta.
+    # Se suman todos los efectos del estado de resultados.
+    utilidad_neta_actual = df_variacion['Valor_actual'].sum()
+    utilidad_neta_previa = df_variacion['Valor_previo'].sum()
 
     # Agrupar variaciones por tipo de cuenta
     variacion_ingresos = df_variacion[df_variacion[cuenta_col].str.startswith('4')]['Variacion_Absoluta'].sum()
     variacion_costos = df_variacion[df_variacion[cuenta_col].str.startswith('6')]['Variacion_Absoluta'].sum()
     variacion_gastos = df_variacion[df_variacion[cuenta_col].str.startswith('5')]['Variacion_Absoluta'].sum()
+    
+    # Sumar otros posibles impactos (ej. no operacionales, impuestos)
+    otras_variaciones = df_variacion['Variacion_Absoluta'].sum() - (variacion_ingresos + variacion_costos + variacion_gastos)
 
-    medidas = ["relative"] * 3
-    textos = [f"${v:,.0f}" for v in [variacion_ingresos, variacion_costos, variacion_gastos]]
+    medidas = ["relative"] * 4
+    textos = [f"${v:,.0f}" for v in [variacion_ingresos, variacion_costos, variacion_gastos, otras_variaciones]]
 
     fig = go.Figure(go.Waterfall(
         name="Variación",
         orientation="v",
         measure=["absolute"] + medidas + ["total"],
-        x=["Utilidad Neta " + periodo_previo, "Ingresos", "Costos", "Gastos de Operación", "Utilidad Neta " + periodo_actual],
+        x=["Utilidad Neta " + periodo_previo, "Ingresos", "Costos", "Gastos Op.", "Otros", "Utilidad Neta " + periodo_actual],
         text= [""] + textos + [""],
-        y=[utilidad_neta_previa, variacion_ingresos, variacion_costos, variacion_gastos, utilidad_neta_actual],
+        y=[utilidad_neta_previa, variacion_ingresos, variacion_costos, variacion_gastos, otras_variaciones, utilidad_neta_actual],
         connector={"line": {"color": "rgb(63, 63, 63)"}},
         decreasing={"marker": {"color": "#28a745"}},  # Favorable (disminuye el valor numérico)
         increasing={"marker": {"color": "#dc3545"}},  # Desfavorable (aumenta el valor numérico)
@@ -121,11 +142,12 @@ def plot_waterfall_utilidad_neta(df_variacion: pd.DataFrame, periodo_actual: str
         yaxis_title="Monto (COP)",
         height=500
     )
-    fig.update_yaxes(formatter_function="function(d){return '$'+(d/1000000).toFixed(1)+'M'}")
+    # Formatear el eje Y a millones o miles para legibilidad
+    fig.update_yaxes(tickformat="$,.0f")
     return fig
 
 # ==============================================================================
-#             CONFIGURACIÓN DE PÁGINA Y AUTENTICACIÓN (Sin cambios)
+#             CONFIGURACIÓN DE PÁGINA Y AUTENTICACIÓN
 # ==============================================================================
 st.set_page_config(layout="wide", page_title="Análisis Financiero Inteligente PRO")
 st.title("🤖 Dashboard Financiero Profesional con IA")
@@ -166,7 +188,7 @@ if not st.session_state.authenticated:
         st.stop()
 
 # ==============================================================================
-#             CARGA DE DATOS AUTOMÁTICA DESDE DROPBOX (Sin cambios)
+#             CARGA DE DATOS AUTOMÁTICA DESDE DROPBOX
 # ==============================================================================
 @st.cache_data(ttl=3600)
 def cargar_y_procesar_datos():
@@ -230,7 +252,6 @@ if selected_view == "Análisis de Evolución (Tendencias)":
         st.stop()
     
     with st.spinner('El Analista Senior IA está evaluando la trayectoria plurianual...'):
-        # La IA ahora puede ser más inteligente si le pasamos más contexto
         analisis_tendencia_ia = generar_analisis_tendencia_ia(df_tendencia) 
     
     st.markdown("### Diagnóstico Estratégico IA")
@@ -309,7 +330,8 @@ else:
     df_variacion_er = None
     if data_previa:
         df_variacion_er = calcular_variaciones_er(df_er_actual, data_previa['df_er_master'], cc_filter)
-        st.info(f"Análisis comparativo contra el periodo **{periodo_previo}**.")
+        if not df_variacion_er.empty:
+            st.info(f"Análisis comparativo contra el periodo **{periodo_previo}**.")
     else:
         st.warning("No hay un periodo anterior para realizar análisis comparativo.")
 
@@ -343,7 +365,7 @@ else:
                     "centro_costo": cc_filter,
                     "convencion_contable": "IMPORTANTE: En el Estado de Resultados, los valores NEGATIVOS como ingresos son FAVORABLES. Los valores POSITIVOS como gastos son DESFAVORABLES. Una disminución en un gasto es una mejora.",
                 }
-                if df_variacion_er is not None:
+                if df_variacion_er is not None and not df_variacion_er.empty:
                     # Variación < 0 es Favorable
                     top_favorables = df_variacion_er.nsmallest(5, 'Variacion_Absoluta')
                     # Variación > 0 es Desfavorable
@@ -356,7 +378,7 @@ else:
     
     with tab_utilidad:
         st.subheader(f"💰 Análisis de la Utilidad Neta: ¿Qué movió el resultado?")
-        if df_variacion_er is not None:
+        if df_variacion_er is not None and not df_variacion_er.empty:
             st.plotly_chart(plot_waterfall_utilidad_neta(df_variacion_er, selected_view, periodo_previo), use_container_width=True)
             
             st.markdown("#### Principales Motores del Cambio vs. Periodo Anterior")
@@ -382,29 +404,35 @@ else:
     with tab_ing:
         st.subheader("📈 Análisis Detallado de Ingresos")
         cuenta_col = er_conf.get('CUENTA', 'Cuenta')
-        df_ingresos = df_er_actual[df_er_actual[cuenta_col].str.startswith('4')]
-
-        if df_variacion_er is not None:
+        valor_col_nombre = 'Total_Consolidado_ER' if cc_filter == 'Todos' else cc_filter
+        
+        if df_variacion_er is not None and not df_variacion_er.empty:
             df_ing_var = df_variacion_er[df_variacion_er[cuenta_col].str.startswith('4')]
+            st.markdown("##### Comparativo de Ingresos vs. Periodo Anterior")
             st.bar_chart(data=df_ing_var.set_index('Descripción')[['Valor_actual', 'Valor_previo']].abs())
             st.dataframe(df_ing_var[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format('${:,.0f}'), use_container_width=True)
         else:
-            st.bar_chart(data=df_ingresos.set_index('Descripción')['Total_Consolidado_ER'].abs())
-            st.dataframe(df_ingresos, use_container_width=True)
+            df_ingresos = df_er_actual[df_er_actual[cuenta_col].str.startswith('4')]
+            if valor_col_nombre in df_ingresos.columns:
+                 st.bar_chart(data=df_ingresos.set_index('Descripción')[valor_col_nombre].abs())
+                 st.dataframe(df_ingresos[['Descripción', valor_col_nombre]], use_container_width=True)
             
     with tab_gas:
         st.subheader("🧾 Análisis Detallado de Gastos")
         cuenta_col = er_conf.get('CUENTA', 'Cuenta')
+        valor_col_nombre = 'Total_Consolidado_ER' if cc_filter == 'Todos' else cc_filter
+
         df_gastos = df_er_actual[df_er_actual[cuenta_col].str.startswith('5')]
         
-        st.markdown("#### Composición de Gastos del Periodo")
-        fig_treemap = px.treemap(df_gastos, path=['Descripción'], values='Total_Consolidado_ER',
-                                 title='Distribución de Gastos Operacionales',
-                                 color='Total_Consolidado_ER',
-                                 color_continuous_scale='Reds')
-        st.plotly_chart(fig_treemap, use_container_width=True)
+        if valor_col_nombre in df_gastos.columns:
+            st.markdown("#### Composición de Gastos del Periodo")
+            fig_treemap = px.treemap(df_gastos, path=['Descripción'], values=valor_col_nombre,
+                                     title='Distribución de Gastos Operacionales',
+                                     color=valor_col_nombre,
+                                     color_continuous_scale='Reds')
+            st.plotly_chart(fig_treemap, use_container_width=True)
 
-        if df_variacion_er is not None:
+        if df_variacion_er is not None and not df_variacion_er.empty:
             st.markdown("#### Comparativo de Gastos vs. Periodo Anterior")
             df_gas_var = df_variacion_er[df_variacion_er[cuenta_col].str.startswith('5')]
             st.bar_chart(data=df_gas_var.set_index('Descripción')[['Valor_actual', 'Valor_previo']])
@@ -437,13 +465,16 @@ else:
             
             st.markdown("El **Análisis DuPont** descompone el ROE en tres palancas: eficiencia operativa (Margen Neto), eficiencia en el uso de activos (Rotación) y apalancamiento financiero. Permite identificar qué motor de la rentabilidad ha cambiado.")
             
-            st.dataframe(df_dupont.style.format({
-                periodo_actual: '{:.2%}',
-                periodo_previo: '{:.2%}',
-                'Variación': '{:+.2%}',
-                'Rotación de Activos': '{:.2f}x',
-                'Apalancamiento Financiero': '{:.2f}x'
-            }).background_gradient(cmap='RdYlGn', subset=['Variación'], low=0.4, high=0.4), use_container_width=True)
+            # Aplicar formato condicional
+            def format_dupont(df):
+                styled_df = df.style.format({
+                    periodo_actual: lambda x: f'{x:.2%}' if abs(x) < 1 else f'{x:.2f}x',
+                    periodo_previo: lambda x: f'{x:.2%}' if abs(x) < 1 else f'{x:.2f}x',
+                    'Variación': lambda x: f'{x:+.2%}' if abs(x) < 1 else f'{x:+.2f}x'
+                }).background_gradient(cmap='RdYlGn', subset=['Variación'], low=0.4, high=0.4)
+                return styled_df
+                
+            st.dataframe(format_dupont(df_dupont), use_container_width=True)
 
         else:
             st.info("Se requiere un periodo anterior para el análisis DuPont comparativo.")
