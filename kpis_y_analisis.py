@@ -76,19 +76,11 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     kpis['pasivo_corriente'] = pasivo_corriente
     kpis['inventarios'] = inventarios
     
-    # Razón Corriente: NUNCA debe ser negativa. Activos y Pasivos son positivos.
     kpis['razon_corriente'] = activo_corriente / pasivo_corriente if pasivo_corriente != 0 else 0
     kpis['endeudamiento_activo'] = pasivo / activo if activo != 0 else 0
-    
-    # ROE: Se estandariza a positivo usando abs() para evitar que la IA o un humano interprete una ganancia como un "ROE negativo".
-    # Un ROE de -15% se entiende universalmente como una pérdida del 15%, lo cual es incorrecto para tu caso. Esta es una traducción necesaria.
     kpis['roe'] = abs(utilidad_neta) / patrimonio if patrimonio != 0 else 0
-    
-    # Márgenes: El resultado ya es positivo (negativo / negativo = positivo). Esto es correcto.
     kpis['margen_neto'] = utilidad_neta / ingresos if ingresos != 0 else 0
     kpis['margen_operacional'] = utilidad_operacional / ingresos if ingresos != 0 else 0
-    
-    # KPIs para DuPont (se estandarizan a positivos para el análisis comparativo)
     kpis['rotacion_activos'] = abs(ingresos) / activo if activo != 0 else 0
     kpis['apalancamiento'] = activo / patrimonio if patrimonio != 0 else 0
 
@@ -171,7 +163,6 @@ def generar_analisis_avanzado_ia(contexto_ia: dict):
     ### Plan de Acción Recomendado 💡
     (Proporciona 2-3 recomendaciones específicas basadas en tu diagnóstico correcto.)
     """
-
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
@@ -239,6 +230,26 @@ def generar_analisis_tendencia_ia(_df_tendencia: pd.DataFrame):
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
+        cleaned_response = response.text.replace('•', '*')
+        return cleaned_response
+    except Exception as e:
+        return f"🔴 **Error al contactar la IA:** {e}."
+
+@st.cache_data(show_spinner=False)
+def generar_analisis_con_prompt_libre(prompt_personalizado: str):
+    """
+    Genera un análisis de IA a partir de un prompt libre y directo.
+    Ideal para casos donde no se necesita un contexto estructurado.
+    """
+    try:
+        api_key = st.secrets["google_ai"]["api_key"]
+        genai.configure(api_key=api_key)
+    except Exception:
+        return "🔴 **Error:** No se encontró la clave de API de Google AI."
+
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt_personalizado)
         cleaned_response = response.text.replace('•', '*')
         return cleaned_response
     except Exception as e:
