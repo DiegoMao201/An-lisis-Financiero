@@ -483,13 +483,13 @@ else:
             st.dataframe(df_gas_var[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict), use_container_width=True)
 
     with tab_roe:
-    st.subheader("🎯 Análisis de Rentabilidad (ROE) con Modelo DuPont")
-    kpis_actuales = kpis_por_tienda.get(cc_filter, {})
+         st.subheader("🎯 Análisis de Rentabilidad (ROE) con Modelo DuPont")
+         kpis_actuales = kpis_por_tienda.get(cc_filter, {})
 
     # --- Definir periodo_actual_idx, periodo_previo y data_previa ---
-    periodo_actual_idx = sorted_periods.index(selected_view)
-    periodo_previo = sorted_periods[periodo_actual_idx + 1] if periodo_actual_idx + 1 < len(sorted_periods) else None
-    data_previa = st.session_state.datos_historicos.get(periodo_previo) if periodo_previo else None
+          periodo_actual_idx = sorted_periods.index(selected_view)
+          periodo_previo = sorted_periods[periodo_actual_idx + 1] if periodo_actual_idx + 1 < len(sorted_periods) else None
+          data_previa = st.session_state.datos_historicos.get(periodo_previo) if periodo_previo else None
 
     if data_previa:
         kpis_previos = data_previa['kpis'].get(cc_filter, {})
