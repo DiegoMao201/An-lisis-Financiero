@@ -5,3 +5,4 @@ openpyxl
 dropbox
 plotly
 google-generativeai
+matplotlib
