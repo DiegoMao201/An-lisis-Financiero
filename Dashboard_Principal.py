@@ -490,22 +490,22 @@ else:
             kpis_previos = data_previa['kpis'].get(cc_filter, {})
             
             dupont_data = {
-                'Componente': ['Margen Neto', 'Rotación de Activos', 'Apalancamiento Financiero', 'ROE'],
-                periodo_actual: [
-                    kpis_actuales.get('margen_neto', 0),
-                    kpis_actuales.get('rotacion_activos', 0),
-                    kpis_actuales.get('apalancamiento', 0),
-                    kpis_actuales.get('roe', 0)
-                ],
-                periodo_previo: [
-                    kpis_previos.get('margen_neto', 0),
-                    kpis_previos.get('rotacion_activos', 0),
-                    kpis_previos.get('apalancamiento', 0),
-                    kpis_previos.get('roe', 0)
-                ]
-            }
-            df_dupont = pd.DataFrame(dupont_data)
-            df_dupont['Variación'] = df_dupont[periodo_actual] - df_dupont[periodo_previo]
+    'Componente': ['Margen Neto', 'Rotación de Activos', 'Apalancamiento Financiero', 'ROE'],
+    selected_view: [
+        kpis_actuales.get('margen_neto', 0),
+        kpis_actuales.get('rotacion_activos', 0),
+        kpis_actuales.get('apalancamiento', 0),
+        kpis_actuales.get('roe', 0)
+    ],
+    periodo_previo: [
+        kpis_previos.get('margen_neto', 0),
+        kpis_previos.get('rotacion_activos', 0),
+        kpis_previos.get('apalancamiento', 0),
+        kpis_previos.get('roe', 0)
+    ]
+}
+df_dupont = pd.DataFrame(dupont_data)
+df_dupont['Variación'] = df_dupont[selected_view] - df_dupont[periodo_previo]
             
             st.markdown("El **Análisis DuPont** descompone el ROE en tres palancas: eficiencia operativa (Margen Neto), eficiencia en el uso de activos (Rotación) y apalancamiento financiero. Permite identificar qué motor de la rentabilidad ha cambiado.")
             
