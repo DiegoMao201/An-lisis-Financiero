@@ -491,7 +491,7 @@ else:
         periodo_previo = sorted_periods[periodo_actual_idx + 1] if periodo_actual_idx + 1 < len(sorted_periods) else None
         data_previa = st.session_state.datos_historicos.get(periodo_previo) if periodo_previo else None
 
-        if data_previa:
+    if data_previa:
             kpis_previos = data_previa['kpis'].get(cc_filter, {})
 
         dupont_data = {
@@ -550,9 +550,9 @@ else:
             cuenta_col_bg = COL_CONFIG['BALANCE_GENERAL'].get('CUENTA', 'Cuenta')
             st.write("**Estado de Resultados**")
             df_search_er = df_er_actual[df_er_actual[cuenta_col_er].astype(str).str.startswith(search_account_input)]
-            if not df_search_er.empty:
+            if not df_search_er.empty: 
                 st.dataframe(df_search_er)
-            else:
+        else:
                 st.info(f"No se encontraron cuentas en el ER para '{search_account_input}'.")
             st.write("**Balance General**")
             df_search_bg = df_bg_actual[df_bg_actual[cuenta_col_bg].astype(str).str.startswith(search_account_input)]
