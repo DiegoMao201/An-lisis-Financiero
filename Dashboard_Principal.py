@@ -483,47 +483,54 @@ else:
             st.dataframe(df_gas_var[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict), use_container_width=True)
 
     with tab_roe:
-        st.subheader("🎯 Análisis de Rentabilidad (ROE) con Modelo DuPont")
-        kpis_actuales = kpis_por_tienda.get(cc_filter, {})
-        
-        # --- Análisis DuPont (corregido para llaves con espacios y uso de variables correctas) ---
-if data_previa:
-    kpis_previos = data_previa['kpis'].get(cc_filter, {})
+    st.subheader("🎯 Análisis de Rentabilidad (ROE) con Modelo DuPont")
+    kpis_actuales = kpis_por_tienda.get(cc_filter, {})
 
-    dupont_data = {
-        'Componente': ['Margen Neto', 'Rotación de Activos', 'Apalancamiento Financiero', 'ROE'],
-        selected_view: [
-            kpis_actuales.get('margen_neto', 0),
-            kpis_actuales.get('rotacion_activos', 0),
-            kpis_actuales.get('apalancamiento', 0),
-            kpis_actuales.get('roe', 0)
-        ],
-        periodo_previo: [
-            kpis_previos.get('margen_neto', 0),
-            kpis_previos.get('rotacion_activos', 0),
-            kpis_previos.get('apalancamiento', 0),
-            kpis_previos.get('roe', 0)
-        ]
-    }
-    df_dupont = pd.DataFrame(dupont_data)
-    df_dupont['Variación'] = df_dupont[selected_view] - df_dupont[periodo_previo]
+    # --- Definir periodo_actual_idx, periodo_previo y data_previa ---
+    periodo_actual_idx = sorted_periods.index(selected_view)
+    periodo_previo = sorted_periods[periodo_actual_idx + 1] if periodo_actual_idx + 1 < len(sorted_periods) else None
+    data_previa = st.session_state.datos_historicos.get(periodo_previo) if periodo_previo else None
 
-    st.markdown("El **Análisis DuPont** descompone el ROE en tres palancas: eficiencia operativa (Margen Neto), eficiencia en el uso de activos (Rotación) y apalancamiento financiero. Permite entender la fuente de la rentabilidad.")
-    st.dataframe(
-        df_dupont.style.format({
-            selected_view: '{:.2%}',
-            periodo_previo: '{:.2%}',
-            'Variación': '{:+.2%}',
-        }).background_gradient(
-            cmap='RdYlGn',
-            subset=['Variación'],
-            low=0.4,
-            high=0.4
-        ),
-        use_container_width=True
-    )
-else:
-    st.info("Se requiere un periodo anterior para el análisis DuPont comparativo.")
+    if data_previa:
+        kpis_previos = data_previa['kpis'].get(cc_filter, {})
+
+        dupont_data = {
+            'Componente': ['Margen Neto', 'Rotación de Activos', 'Apalancamiento Financiero', 'ROE'],
+            selected_view: [
+                kpis_actuales.get('margen_neto', 0),
+                kpis_actuales.get('rotacion_activos', 0),
+                kpis_actuales.get('apalancamiento', 0),
+                kpis_actuales.get('roe', 0)
+            ],
+            periodo_previo: [
+                kpis_previos.get('margen_neto', 0),
+                kpis_previos.get('rotacion_activos', 0),
+                kpis_previos.get('apalancamiento', 0),
+                kpis_previos.get('roe', 0)
+            ]
+        }
+        df_dupont = pd.DataFrame(dupont_data)
+        df_dupont['Variación'] = df_dupont[selected_view] - df_dupont[periodo_previo]
+
+        st.markdown(
+            "El **Análisis DuPont** descompone el ROE en tres palancas: eficiencia operativa (Margen Neto), eficiencia en el uso de activos (Rotación) y apalancamiento financiero. "
+            "Permite entender la fuente de la rentabilidad."
+        )
+        st.dataframe(
+            df_dupont.style.format({
+                selected_view: '{:.2%}',
+                periodo_previo: '{:.2%}',
+                'Variación': '{:+.2%}',
+            }).background_gradient(
+                cmap='RdYlGn',
+                subset=['Variación'],
+                low=0.4,
+                high=0.4
+            ),
+            use_container_width=True
+        )
+    else:
+        st.info("Se requiere un periodo anterior para el análisis DuPont comparativo.")
 
     with tab_rep:
         st.subheader("📊 Reportes Financieros Detallados")
