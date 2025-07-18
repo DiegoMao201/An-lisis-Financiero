@@ -556,9 +556,9 @@ with tab_roe:
                 st.info(f"No se encontraron cuentas en el ER para '{search_account_input}'.")
             st.write("**Balance General**")
             df_search_bg = df_bg_actual[df_bg_actual[cuenta_col_bg].astype(str).str.startswith(search_account_input)]
-            if not df_search_bg.empty:
+        if not df_search_bg.empty:
                 st.dataframe(df_search_bg)
-            else:
+        else:
                 st.info(f"No se encontraron cuentas en el BG para '{search_account_input}'.")
 
     st.sidebar.markdown("---")
