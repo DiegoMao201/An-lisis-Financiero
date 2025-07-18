@@ -66,7 +66,7 @@ def calcular_variaciones_er(df_actual: pd.DataFrame, df_previo: pd.DataFrame, cc
     """
     er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
     cuenta_col = er_conf.get('CUENTA', 'Cuenta')
-    desc_col = er_conf.get('DESCRIPCION_CUENTA', 'Titulo')
+    desc_col = er_conf.get('DESCRIPCION_CUENTA', 'Título')
     valor_col_nombre = 'Total_Consolidado_ER' if cc_filter == 'Todos' else cc_filter
 
     # --- VERIFICACIÓN DE COLUMNAS REFORZADA ---
