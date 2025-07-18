@@ -112,14 +112,10 @@ def calcular_variaciones_er(df_actual: pd.DataFrame, df_previo: pd.DataFrame, cc
 
     df_variacion['Variacion_Absoluta'] = df_variacion['Valor_actual'] - df_variacion['Valor_previo']
     
-    # ==============================================================================
-    # ⭐️ INICIO DE LA CORRECCIÓN ⭐️
     # Se renombra la columna de descripción (ej: 'Título') a 'Descripción' para
     # estandarizarla con el resto de la aplicación y evitar el KeyError.
     if desc_col != 'Descripción':
         df_variacion.rename(columns={desc_col: 'Descripción'}, inplace=True)
-    # ⭐️ FIN DE LA CORRECCIÓN ⭐️
-    # ==============================================================================
     
     return df_variacion
 
@@ -411,12 +407,24 @@ else:
             top_desfavorables = df_variacion_er[df_variacion_er['Variacion_Absoluta'] > 0].sort_values('Variacion_Absoluta', ascending=False).head(10)
             top_desfavorables = top_desfavorables[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']]
 
+            # ==============================================================================
+            # ⭐️ INICIO DE LA CORRECCIÓN ⭐️
+            # Se define un diccionario para aplicar formato solo a columnas numéricas
+            # y así evitar el ValueError al intentar formatear la columna de texto.
+            format_dict = {
+                'Valor_previo': '${:,.0f}',
+                'Valor_actual': '${:,.0f}',
+                'Variacion_Absoluta': '${:,.0f}'
+            }
+            # ⭐️ FIN DE LA CORRECCIÓN ⭐️
+            # ==============================================================================
+
             with col1:
                 st.markdown("✅ **Impactos Positivos (Ayudaron a la Utilidad)**")
-                st.dataframe(top_favorables.style.format('${:,.0f}').background_gradient(cmap='Greens', subset=['Variacion_Absoluta']), use_container_width=True)
+                st.dataframe(top_favorables.style.format(format_dict).background_gradient(cmap='Greens', subset=['Variacion_Absoluta']), use_container_width=True)
             with col2:
                 st.markdown("❌ **Impactos Negativos (Perjudicaron la Utilidad)**")
-                st.dataframe(top_desfavorables.style.format('${:,.0f}').background_gradient(cmap='Reds', subset=['Variacion_Absoluta']), use_container_width=True)
+                st.dataframe(top_desfavorables.style.format(format_dict).background_gradient(cmap='Reds', subset=['Variacion_Absoluta']), use_container_width=True)
         else:
             st.info("Se requiere un periodo anterior para este análisis.")
 
@@ -429,12 +437,21 @@ else:
             df_ing_var = df_variacion_er[df_variacion_er[cuenta_col].astype(str).str.startswith('4')]
             st.markdown("##### Comparativo de Ingresos vs. Periodo Anterior")
             st.bar_chart(data=df_ing_var.set_index('Descripción')[['Valor_actual', 'Valor_previo']].abs())
-            st.dataframe(df_ing_var[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format('${:,.0f}'), use_container_width=True)
+            
+            # Corrección aplicada aquí también
+            format_dict = {
+                'Valor_previo': '${:,.0f}',
+                'Valor_actual': '${:,.0f}',
+                'Variacion_Absoluta': '${:,.0f}'
+            }
+            st.dataframe(df_ing_var[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict), use_container_width=True)
         else:
             if valor_col_nombre in df_er_actual.columns and cuenta_col in df_er_actual.columns:
                 df_ingresos = df_er_actual[df_er_actual[cuenta_col].astype(str).str.startswith('4')]
-                st.bar_chart(data=df_ingresos.set_index('Descripción')[valor_col_nombre].abs())
-                st.dataframe(df_ingresos[['Descripción', valor_col_nombre]], use_container_width=True)
+                # La columna 'Descripción' no existe en el DataFrame original, se usa la correcta
+                desc_col_name = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('DESCRIPCION_CUENTA', 'Título')
+                st.bar_chart(data=df_ingresos.set_index(desc_col_name)[valor_col_nombre].abs())
+                st.dataframe(df_ingresos[[desc_col_name, valor_col_nombre]], use_container_width=True)
     
     with tab_gas:
         st.subheader("🧾 Análisis Detallado de Gastos")
@@ -444,7 +461,9 @@ else:
         if valor_col_nombre in df_er_actual.columns and cuenta_col in df_er_actual.columns:
             df_gastos = df_er_actual[df_er_actual[cuenta_col].astype(str).str.startswith('5')]
             st.markdown("#### Composición de Gastos del Periodo")
-            fig_treemap = px.treemap(df_gastos, path=['Descripción'], values=valor_col_nombre,
+            # La columna 'Descripción' no existe en el DataFrame original, se usa la correcta
+            desc_col_name = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('DESCRIPCION_CUENTA', 'Título')
+            fig_treemap = px.treemap(df_gastos, path=[desc_col_name], values=valor_col_nombre,
                                      title='Distribución de Gastos Operacionales',
                                      color=valor_col_nombre,
                                      color_continuous_scale='Reds')
@@ -454,7 +473,14 @@ else:
             st.markdown("#### Comparativo de Gastos vs. Periodo Anterior")
             df_gas_var = df_variacion_er[df_variacion_er[cuenta_col].astype(str).str.startswith('5')]
             st.bar_chart(data=df_gas_var.set_index('Descripción')[['Valor_actual', 'Valor_previo']])
-            st.dataframe(df_gas_var[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format('${:,.0f}'), use_container_width=True)
+            
+            # Corrección aplicada aquí también
+            format_dict = {
+                'Valor_previo': '${:,.0f}',
+                'Valor_actual': '${:,.0f}',
+                'Variacion_Absoluta': '${:,.0f}'
+            }
+            st.dataframe(df_gas_var[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict), use_container_width=True)
 
     with tab_roe:
         st.subheader("🎯 Análisis de Rentabilidad (ROE) con Modelo DuPont")
