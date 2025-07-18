@@ -492,7 +492,7 @@ else:
         data_previa = st.session_state.datos_historicos.get(periodo_previo) if periodo_previo else None
 
         if data_previa:
-        kpis_previos = data_previa['kpis'].get(cc_filter, {})
+            kpis_previos = data_previa['kpis'].get(cc_filter, {})
 
         dupont_data = {
             'Componente': ['Margen Neto', 'Rotación de Activos', 'Apalancamiento Financiero', 'ROE'],
