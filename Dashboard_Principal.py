@@ -550,7 +550,7 @@ with tab_roe:
             cuenta_col_bg = COL_CONFIG['BALANCE_GENERAL'].get('CUENTA', 'Cuenta')
             st.write("**Estado de Resultados**")
             df_search_er = df_er_actual[df_er_actual[cuenta_col_er].astype(str).str.startswith(search_account_input)]
-            if not df_search_er.empty: 
+        if not df_search_er.empty: 
                 st.dataframe(df_search_er)
         else:
                 st.info(f"No se encontraron cuentas en el ER para '{search_account_input}'.")
