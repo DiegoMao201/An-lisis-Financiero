@@ -101,7 +101,6 @@ with tab1:
         
         with st.expander("🧠 Ver Análisis Comparativo por IA", expanded=True):
             with st.spinner("El Contralor IA está comparando los periodos..."):
-                # LLAMADA CORREGIDA: Se usa la función que solo necesita el prompt
                 analisis_comparativo = generar_analisis_con_prompt_libre(prompt_horizontal)
                 st.markdown(analisis_comparativo, unsafe_allow_html=True)
                 
@@ -258,24 +257,27 @@ with tab4:
 
 
 # ==============================================================================
-#      PESTAÑA 5: ESTADOS FINANCIEROS CONSOLIDADOS CON FILTRO (CORREGIDO)
+#      PESTAÑA 5: ESTADOS FINANCIEROS CONSOLIDADOS (LÓGICA FINAL)
 # ==============================================================================
 with tab5:
     st.header("📈 Estados Financieros Consolidados por Periodo y Centro de Costo")
-    st.markdown("""
-    Esta sección te permite consolidar (sumar) todos los periodos históricos para obtener una visión acumulada. 
-    Puedes filtrar por un **Centro de Costo** específico o ver el **Consolidado General** de la compañía.
-    """)
+    st.markdown("Esta sección consolida (suma) todos los periodos históricos para obtener una visión acumulada, adaptándose a la estructura de tus datos.")
 
     if 'datos_historicos' in st.session_state and st.session_state.datos_historicos:
         
+        # --- Obtener dinámicamente la lista de Centros de Costo disponibles ---
+        # Basado en las columnas que vimos en el error, que son los nombres de los CC.
         all_cost_centers = set()
         for period_data in datos_historicos.values():
-            if 'df_er' in period_data and 'Centro de Costo' in period_data['df_er'].columns:
-                all_cost_centers.update(period_data['df_er']['Centro de Costo'].unique())
-            if 'df_bg' in period_data and 'Centro de Costo' in period_data['df_bg'].columns:
-                 all_cost_centers.update(period_data['df_bg']['Centro de Costo'].unique())
-        
+            if 'df_er' in period_data:
+                 # Ejemplo de columnas de CC: 'Armenia', 'San antonio', 'Opalo'...
+                 # Esta lógica asume que los nombres de los CC son las columnas.
+                 # Se extraen las columnas que NO son fijas.
+                 fixed_cols = ['Grupo', 'Cuenta', 'Título', 'Total_Consolidado_ER', 'Tipo_Estado']
+                 for col in period_data['df_er'].columns:
+                     if col not in fixed_cols and not col.replace('.','',1).isdigit(): # Evitar columnas numéricas
+                         all_cost_centers.add(col)
+
         lista_filtros_cc = ["Consolidado"] + sorted(list(all_cost_centers))
         
         cc_seleccionado = st.selectbox(
@@ -286,19 +288,9 @@ with tab5:
         
         st.info(f"Mostrando datos para: **{cc_seleccionado}**")
 
-        lista_er, lista_bg = [], []
-        if cc_seleccionado == "Consolidado":
-            for data in datos_historicos.values():
-                if 'df_er_master' in data: lista_er.append(data['df_er_master'])
-                if 'df_bg_master' in data: lista_bg.append(data['df_bg_master'])
-        else:
-            for data in datos_historicos.values():
-                if 'df_er' in data:
-                    df_er_filtrado = data['df_er'][data['df_er']['Centro de Costo'] == cc_seleccionado]
-                    if not df_er_filtrado.empty: lista_er.append(df_er_filtrado)
-                if 'df_bg' in data:
-                    df_bg_filtrado = data['df_bg'][data['df_bg']['Centro de Costo'] == cc_seleccionado]
-                    if not df_bg_filtrado.empty: lista_bg.append(df_bg_filtrado)
+        # --- Recopilar todos los dataframes de todos los periodos ---
+        lista_er = [data['df_er'] for data in datos_historicos.values() if 'df_er' in data]
+        lista_bg = [data['df_bg'] for data in datos_historicos.values() if 'df_bg' in data]
 
         col_er, col_bg = st.columns(2)
 
@@ -306,45 +298,63 @@ with tab5:
             st.subheader("Estado de Resultados (Acumulado)")
             if lista_er:
                 df_er_completo = pd.concat(lista_er, ignore_index=True)
-                # --- INICIO DE LA CORRECCIÓN ---
-                # Verificar si las columnas necesarias existen antes de agrupar
-                required_cols_er = ['Cuenta', 'Valor']
-                if all(col in df_er_completo.columns for col in required_cols_er):
-                    df_er_consolidado = df_er_completo.groupby('Cuenta')['Valor'].sum().reset_index()
-                    st.dataframe(
-                        df_er_consolidado.style.format({'Valor': "${:,.0f}"}),
-                        use_container_width=True, height=600
-                    )
-                else:
-                    st.error("Error de Configuración de Columnas (ER):", icon="🚨")
-                    st.markdown(f"El DataFrame consolidado no contiene las columnas esperadas (`{', '.join(required_cols_er)}`).")
-                    st.markdown(f"**Columnas encontradas:** `{', '.join(df_er_completo.columns)}`")
-                    st.write("Por favor, revisa el nombre de las columnas en tus archivos de origen o en la lógica de carga de datos.")
-                # --- FIN DE LA CORRECCIÓN ---
+                
+                # --- LÓGICA DE AGREGACIÓN ADAPTADA ---
+                try:
+                    # Determinar qué columna sumar basado en la selección
+                    if cc_seleccionado == "Consolidado":
+                        columna_a_sumar = 'Total_Consolidado_ER'
+                    else:
+                        columna_a_sumar = cc_seleccionado # El nombre del CC es la columna
+                    
+                    # Asegurarse de que la columna exista
+                    if columna_a_sumar in df_er_completo.columns:
+                        # Agrupar por 'Cuenta' y sumar la columna correcta
+                        df_er_consolidado = df_er_completo.groupby('Cuenta')[columna_a_sumar].sum().reset_index()
+                        
+                        # Renombrar la columna sumada a 'Valor' para el formato
+                        df_er_consolidado.rename(columns={columna_a_sumar: 'Valor'}, inplace=True)
+                        
+                        st.dataframe(
+                            df_er_consolidado.style.format({'Valor': "${:,.0f}"}),
+                            use_container_width=True, height=600
+                        )
+                    else:
+                        st.error(f"La columna '{columna_a_sumar}' no se encontró en los datos de ER.", icon="🚨")
+
+                except Exception as e:
+                    st.error(f"Ocurrió un error al procesar el Estado de Resultados: {e}", icon="🔥")
             else:
-                st.warning(f"No se encontraron datos del Estado de Resultados para '{cc_seleccionado}'.")
+                st.warning("No se encontraron datos del Estado de Resultados para consolidar.")
 
         with col_bg:
             st.subheader("Balance General (Acumulado)")
             st.markdown("<small>Nota: La suma de balances es conceptualmente inusual.</small>", unsafe_allow_html=True)
             if lista_bg:
                 df_bg_completo = pd.concat(lista_bg, ignore_index=True)
-                # --- INICIO DE LA CORRECCIÓN ---
-                # Verificar también para el Balance General
-                required_cols_bg = ['Cuenta', 'Valor']
-                if all(col in df_bg_completo.columns for col in required_cols_bg):
-                    df_bg_consolidado = df_bg_completo.groupby('Cuenta')['Valor'].sum().reset_index()
-                    st.dataframe(
-                        df_bg_consolidado.style.format({'Valor': "${:,.0f}"}),
-                        use_container_width=True, height=600
-                    )
-                else:
-                    st.error("Error de Configuración de Columnas (BG):", icon="🚨")
-                    st.markdown(f"El DataFrame consolidado no contiene las columnas esperadas (`{', '.join(required_cols_bg)}`).")
-                    st.markdown(f"**Columnas encontradas:** `{', '.join(df_bg_completo.columns)}`")
-                    st.write("Por favor, revisa el nombre de las columnas en tus archivos de origen.")
-                # --- FIN DE LA CORRECCIÓN ---
+                
+                # --- LÓGICA DE AGREGACIÓN ADAPTADA ---
+                try:
+                    # Para el Balance, la columna a sumar es siempre 'Saldo Final'
+                    columna_a_sumar_bg = 'Saldo Final'
+
+                    if columna_a_sumar_bg in df_bg_completo.columns:
+                        df_bg_consolidado = df_bg_completo.groupby('Cuenta')[columna_a_sumar_bg].sum().reset_index()
+                        
+                        # Renombrar a 'Valor' para el formato
+                        df_bg_consolidado.rename(columns={columna_a_sumar_bg: 'Valor'}, inplace=True)
+                        
+                        st.dataframe(
+                            df_bg_consolidado.style.format({'Valor': "${:,.0f}"}),
+                            use_container_width=True, height=600
+                        )
+                    else:
+                        st.error(f"La columna '{columna_a_sumar_bg}' no se encontró en los datos de BG.", icon="🚨")
+                        st.write("Columnas disponibles:", df_bg_completo.columns.to_list())
+
+                except Exception as e:
+                    st.error(f"Ocurrió un error al procesar el Balance General: {e}", icon="🔥")
             else:
-                st.warning(f"No se encontraron datos del Balance General para '{cc_seleccionado}'.")
+                st.warning("No se encontraron datos del Balance General para consolidar.")
     else:
         st.error("No hay datos históricos cargados para generar el consolidado.")
