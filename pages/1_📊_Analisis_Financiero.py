@@ -257,7 +257,7 @@ with tab4:
 
 
 # ==============================================================================
-#      PESTAÑA 5: ESTADOS FINANCIEROS CONSOLIDADOS (LÓGICA FINAL)
+#      PESTAÑA 5: ESTADOS FINANCIEROS CONSOLIDADOS (LÓGICA FINAL-CORREGIDA)
 # ==============================================================================
 with tab5:
     st.header("📈 Estados Financieros Consolidados por Periodo y Centro de Costo")
@@ -266,16 +266,13 @@ with tab5:
     if 'datos_historicos' in st.session_state and st.session_state.datos_historicos:
         
         # --- Obtener dinámicamente la lista de Centros de Costo disponibles ---
-        # Basado en las columnas que vimos en el error, que son los nombres de los CC.
         all_cost_centers = set()
+        # **CORRECCIÓN:** Buscamos los centros de costo en 'df_er_master'
         for period_data in datos_historicos.values():
-            if 'df_er' in period_data:
-                 # Ejemplo de columnas de CC: 'Armenia', 'San antonio', 'Opalo'...
-                 # Esta lógica asume que los nombres de los CC son las columnas.
-                 # Se extraen las columnas que NO son fijas.
+            if 'df_er_master' in period_data:
                  fixed_cols = ['Grupo', 'Cuenta', 'Título', 'Total_Consolidado_ER', 'Tipo_Estado']
-                 for col in period_data['df_er'].columns:
-                     if col not in fixed_cols and not col.replace('.','',1).isdigit(): # Evitar columnas numéricas
+                 for col in period_data['df_er_master'].columns:
+                     if col not in fixed_cols and not col.replace('.','',1).isdigit():
                          all_cost_centers.add(col)
 
         lista_filtros_cc = ["Consolidado"] + sorted(list(all_cost_centers))
@@ -289,8 +286,9 @@ with tab5:
         st.info(f"Mostrando datos para: **{cc_seleccionado}**")
 
         # --- Recopilar todos los dataframes de todos los periodos ---
-        lista_er = [data['df_er'] for data in datos_historicos.values() if 'df_er' in data]
-        lista_bg = [data['df_bg'] for data in datos_historicos.values() if 'df_bg' in data]
+        # **CORRECCIÓN CLAVE:** Usar 'df_er_master' y 'df_bg_master' que son los nombres correctos.
+        lista_er = [data['df_er_master'] for data in datos_historicos.values() if 'df_er_master' in data]
+        lista_bg = [data['df_bg_master'] for data in datos_historicos.values() if 'df_bg_master' in data]
 
         col_er, col_bg = st.columns(2)
 
@@ -299,20 +297,14 @@ with tab5:
             if lista_er:
                 df_er_completo = pd.concat(lista_er, ignore_index=True)
                 
-                # --- LÓGICA DE AGREGACIÓN ADAPTADA ---
                 try:
-                    # Determinar qué columna sumar basado en la selección
                     if cc_seleccionado == "Consolidado":
                         columna_a_sumar = 'Total_Consolidado_ER'
                     else:
-                        columna_a_sumar = cc_seleccionado # El nombre del CC es la columna
+                        columna_a_sumar = cc_seleccionado
                     
-                    # Asegurarse de que la columna exista
                     if columna_a_sumar in df_er_completo.columns:
-                        # Agrupar por 'Cuenta' y sumar la columna correcta
                         df_er_consolidado = df_er_completo.groupby('Cuenta')[columna_a_sumar].sum().reset_index()
-                        
-                        # Renombrar la columna sumada a 'Valor' para el formato
                         df_er_consolidado.rename(columns={columna_a_sumar: 'Valor'}, inplace=True)
                         
                         st.dataframe(
@@ -325,7 +317,8 @@ with tab5:
                 except Exception as e:
                     st.error(f"Ocurrió un error al procesar el Estado de Resultados: {e}", icon="🔥")
             else:
-                st.warning("No se encontraron datos del Estado de Resultados para consolidar.")
+                # Este mensaje aparece si la lista_er está vacía
+                st.warning("No se encontraron datos del Estado de Resultados para consolidar. Verifique que los datos cargados contengan el DataFrame 'df_er_master'.")
 
         with col_bg:
             st.subheader("Balance General (Acumulado)")
@@ -333,15 +326,11 @@ with tab5:
             if lista_bg:
                 df_bg_completo = pd.concat(lista_bg, ignore_index=True)
                 
-                # --- LÓGICA DE AGREGACIÓN ADAPTADA ---
                 try:
-                    # Para el Balance, la columna a sumar es siempre 'Saldo Final'
                     columna_a_sumar_bg = 'Saldo Final'
 
                     if columna_a_sumar_bg in df_bg_completo.columns:
                         df_bg_consolidado = df_bg_completo.groupby('Cuenta')[columna_a_sumar_bg].sum().reset_index()
-                        
-                        # Renombrar a 'Valor' para el formato
                         df_bg_consolidado.rename(columns={columna_a_sumar_bg: 'Valor'}, inplace=True)
                         
                         st.dataframe(
@@ -355,6 +344,7 @@ with tab5:
                 except Exception as e:
                     st.error(f"Ocurrió un error al procesar el Balance General: {e}", icon="🔥")
             else:
-                st.warning("No se encontraron datos del Balance General para consolidar.")
+                 # Este mensaje aparece si la lista_bg está vacía
+                st.warning("No se encontraron datos del Balance General para consolidar. Verifique que los datos cargados contengan el DataFrame 'df_bg_master'.")
     else:
         st.error("No hay datos históricos cargados para generar el consolidado.")
