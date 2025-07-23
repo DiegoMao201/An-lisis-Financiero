@@ -3,12 +3,14 @@ import pandas as pd
 import streamlit as st
 import google.generativeai as genai
 from mi_logica_original import get_principal_account_value, COL_CONFIG
+import numpy as np # Importamos numpy para manejar divisiones por cero de forma segura
 
 def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: str = 'Todos') -> dict:
     """
     Calcula un set de KPIs para un único periodo.
     Esta función es la ÚNICA fuente de verdad para los cálculos numéricos.
     Se adapta para calcular el consolidado ('Todos') o un centro de costo específico.
+    *** LÓGICA CORREGIDA ***
     """
     kpis = {}
     er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
@@ -38,8 +40,11 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
 
     if not val_col_kpi or val_col_kpi not in df_er.columns: return kpis
 
+    # --- EXTRACCIÓN CON LÓGICA DE SIGNOS INVERTIDA (COMO EN EL ORIGEN) ---
     cuenta_er = er_conf['CUENTA']
-    ingresos = get_principal_account_value(df_er, '4', val_col_kpi, cuenta_er)
+    # Ingresos vienen como negativos
+    ingresos_raw = get_principal_account_value(df_er, '4', val_col_kpi, cuenta_er)
+    # Costos y Gastos vienen como positivos
     costo_ventas = get_principal_account_value(df_er, '6', val_col_kpi, cuenta_er)
     gastos_admin = get_principal_account_value(df_er, '51', val_col_kpi, cuenta_er)
     gastos_ventas = get_principal_account_value(df_er, '52', val_col_kpi, cuenta_er)
@@ -47,10 +52,19 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     gastos_no_op = get_principal_account_value(df_er, '53', val_col_kpi, cuenta_er)
     impuestos = get_principal_account_value(df_er, '54', val_col_kpi, cuenta_er)
     
-    utilidad_bruta = ingresos + costo_ventas
+    # --- CÁLCULOS INTERMEDIOS (TODAVÍA CON SIGNOS INVERTIDOS) ---
+    utilidad_bruta_raw = ingresos_raw + costo_ventas # (Ej: -1000 + 400 = -600)
     gastos_operativos = gastos_admin + gastos_ventas + costos_prod
-    utilidad_operacional = utilidad_bruta + gastos_operativos
-    utilidad_neta = utilidad_operacional + gastos_no_op + impuestos
+    utilidad_operacional_raw = utilidad_bruta_raw + gastos_operativos # (Ej: -600 + 300 = -300)
+    utilidad_neta_raw = utilidad_operacional_raw + gastos_no_op + impuestos # (Ej: -300 + 50 = -250)
+
+    # --- AJUSTE Y ESTANDARIZACIÓN DE SIGNOS PARA KPIS FINALES ---
+    # Convertimos valores a la lógica estándar: Ganancia > 0, Pérdida < 0
+    # Multiplicamos por -1 para invertir el signo y estandarizar.
+    ingresos = ingresos_raw * -1
+    utilidad_bruta = utilidad_bruta_raw * -1
+    utilidad_operacional = utilidad_operacional_raw * -1
+    utilidad_neta = utilidad_neta_raw * -1
 
     kpis['ingresos'] = ingresos
     kpis['costo_ventas'] = costo_ventas
@@ -59,6 +73,7 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     kpis['utilidad_operacional'] = utilidad_operacional
     kpis['utilidad_neta'] = utilidad_neta
     
+    # --- EXTRACCIÓN DE BALANCE GENERAL (VALORES YA POSITIVOS) ---
     cuenta_bg = bg_conf['CUENTA']
     saldo_final_col = bg_conf['SALDO_FINAL']
 
@@ -76,13 +91,20 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     kpis['pasivo_corriente'] = pasivo_corriente
     kpis['inventarios'] = inventarios
     
-    kpis['razon_corriente'] = activo_corriente / pasivo_corriente if pasivo_corriente != 0 else 0
-    kpis['endeudamiento_activo'] = pasivo / activo if activo != 0 else 0
-    kpis['roe'] = abs(utilidad_neta) / patrimonio if patrimonio != 0 else 0
-    kpis['margen_neto'] = utilidad_neta / ingresos if ingresos != 0 else 0
-    kpis['margen_operacional'] = utilidad_operacional / ingresos if ingresos != 0 else 0
-    kpis['rotacion_activos'] = abs(ingresos) / activo if activo != 0 else 0
-    kpis['apalancamiento'] = activo / patrimonio if patrimonio != 0 else 0
+    # --- CÁLCULO DE RATIOS CON VALORES ESTANDARIZADOS Y SEGUROS ---
+    # Usamos np.divide para manejar divisiones por cero de forma segura y abs() para asegurar que los denominadores sean positivos.
+    kpis['razon_corriente'] = np.divide(abs(activo_corriente), abs(pasivo_corriente)) if pasivo_corriente != 0 else 0
+    kpis['endeudamiento_activo'] = np.divide(abs(pasivo), abs(activo)) if activo != 0 else 0
+    
+    # ROE: La utilidad neta ya tiene el signo correcto. Positivo=Ganancia, Negativo=Pérdida.
+    kpis['roe'] = np.divide(utilidad_neta, abs(patrimonio)) if patrimonio != 0 else 0
+    
+    # Márgenes: Usan la utilidad (ya con signo correcto) y los ingresos (en valor absoluto).
+    kpis['margen_neto'] = np.divide(utilidad_neta, abs(ingresos)) if ingresos != 0 else 0
+    kpis['margen_operacional'] = np.divide(utilidad_operacional, abs(ingresos)) if ingresos != 0 else 0
+    
+    kpis['rotacion_activos'] = np.divide(abs(ingresos), abs(activo)) if activo != 0 else 0
+    kpis['apalancamiento'] = np.divide(abs(activo), abs(patrimonio)) if patrimonio != 0 else 0
 
     if '__temp_sum_kpi' in df_er.columns:
         df_er.drop(columns=['__temp_sum_kpi'], inplace=True)
@@ -124,44 +146,51 @@ def generar_analisis_avanzado_ia(contexto_ia: dict):
     prompt = f"""
     **Rol:** Eres un Asesor Financiero Estratégico y CFO virtual. Tu análisis debe ser agudo, directo y accionable.
 
-    **REGLA DE ORO Y LÓGICA DE NEGOCIO (¡INSTRUCCIÓN CRÍTICA!):**
+    **REGLA DE ORO Y LÓGICA DE NEGOCIO (¡INSTRUCCIONES CRÍTICAS!):**
     {convencion}
 
     **INSTRUCCIONES DE INTERPRETACIÓN Y LENGUAJE (¡LA PARTE MÁS IMPORTANTE!):**
-    - Tu tarea más crítica es usar el lenguaje correcto que refleje la lógica del negocio.
-    - Cuando una cuenta de **Ingreso** (código empieza por '4') o una cuenta de **Activo** se vuelve **MÁS NEGATIVA** (ej: de -70M a -240M), **DEBES OBLIGATORIAMENTE** describirlo como un **"CRECIMIENTO", "AUMENTO" o "INCREMENTO FAVORABLE"**.
-    - **NUNCA, BAJO NINGUNA CIRCUNSTANCIA**, uses las palabras "caída", "disminución", "reducción" o "variación negativa" para describir este evento. Es un **CRECIMIENTO POSITIVO** para el negocio.
-    - Si la **'Variacion_Absoluta'** en la tabla de impactos es **NEGATIVA**, significa que hubo un **CRECIMIENTO o MEJORA**. Un número como -170,000,000 es un **FUERTE INCREMENTO**, no una caída.
-    - Para cuentas de **Gasto/Costo** (códigos '5', '6', '7', '8'), un aumento en su valor (positivo) es un impacto desfavorable. Una disminución es una mejora.
+    Tu tarea tiene dos partes lógicas que debes seguir rigurosamente:
+
+    **1. Para Analizar las *Variaciones* y sus *Causas* (Impactos Positivos y Negativos):**
+    - Cuando una cuenta de **Ingreso** (código '4') se vuelve **MÁS NEGATIVA** (ej: de -70M a -240M), descríbelo como un **"CRECIMIENTO", "AUMENTO" o "INCREMENTO FAVORABLE"**.
+    - **NUNCA** uses "caída" o "reducción" para describir este evento. Es un **CRECIMIENTO POSITIVO** para el negocio.
+    - Si la **'Variacion_Absoluta'** en la tabla de impactos es **NEGATIVA**, significa que hubo un **CRECIMIENTO o MEJORA**. Un número como -170,000,000 es un **FUERTE INCREMENTO**.
+    - Para cuentas de **Gasto/Costo** (códigos '5', '6', '7'), un aumento en su valor (positivo) es un impacto desfavorable.
+
+    **2. Para Analizar los *Indicadores Clave (KPIs) Finales*:**
+    - Los KPIs que te proporciono ya están **ESTANDARIZADOS** a la lógica financiera universal.
+    - **Utilidad Neta:** Un valor **POSITIVO es una GANANCIA ✅**. Un valor **NEGATIVO es una PÉRDIDA 🔻**.
+    - **ROE, Razón Corriente, Márgenes:** Interpreta estos ratios de la forma estándar. Un ROE negativo indica una pérdida neta. Un margen negativo indica que los costos superaron los ingresos.
 
     **Contexto de Análisis:**
     - **Periodo:** {periodo}
     - **Unidad de Negocio:** "{cc}"
 
-    **Indicadores Clave (KPIs) del Periodo:**
-    - **Utilidad Neta (Negativo=Ganancia):** ${kpis.get('utilidad_neta', 0):,.0f}
+    **Indicadores Clave (KPIs) del Periodo (Lógica Estándar):**
+    - **Utilidad Neta:** ${kpis.get('utilidad_neta', 0):,.0f}
     - **Margen Neto:** {kpis.get('margen_neto', 0):.2%}
     - **ROE (Rentabilidad sobre Patrimonio):** {kpis.get('roe', 0):.2%}
     - **Razón Corriente (Liquidez):** {kpis.get('razon_corriente', 0):.2f}
     - **Nivel de Endeudamiento:** {kpis.get('endeudamiento_activo', 0):.2%}
 
-    **Análisis Comparativo vs. Periodo Anterior:**
+    **Análisis Comparativo vs. Periodo Anterior (Causas):**
     - **Principales Impactos Positivos (Crecimientos/Mejoras):**
     {fav_str}
     - **Principales Impactos Negativos (Deterioros):**
     {des_str}
 
     **Instrucciones de Respuesta:**
-    Con base en TODA la información y respetando rigurosamente las reglas de interpretación, genera un informe ejecutivo. Usa emojis (📈, ⚠️, ✅, 💡).
+    Con base en TODA la información y respetando rigurosamente las reglas de interpretación, genera un informe ejecutivo. Usa emojis (📈, ⚠️, ✅, 💡, 🔻).
 
     ### Diagnóstico General 🎯
-    (Ofrece un veredicto claro sobre la salud financiera, usando el lenguaje correcto. Ejemplo: "El periodo muestra un crecimiento robusto en los ingresos...")
+    (Ofrece un veredicto claro sobre la salud financiera. Indica si hubo ganancia o pérdida, y luego explica las causas usando la lógica de variaciones. Ejemplo: "El periodo cerró con una ganancia/pérdida neta de $X. Este resultado fue impulsado principalmente por un fuerte crecimiento en los ingresos de Y, aunque se vio contrarrestado por un aumento en los gastos Z.")
 
     ### Puntos Clave del Análisis 🔑
-    (Detalla las 3 observaciones más importantes. Conecta los KPIs con las variaciones. Ejemplo: "El **fuerte incremento** en la cuenta X, que se refleja como un impacto positivo de -170M, fue el principal motor del **crecimiento** de la utilidad neta.")
+    (Detalla 2-3 observaciones importantes. Conecta los KPIs finales con las variaciones que los causaron.)
 
     ### Plan de Acción Recomendado 💡
-    (Proporciona 2-3 recomendaciones específicas basadas en tu diagnóstico correcto.)
+    (Proporciona 2-3 recomendaciones específicas basadas en tu diagnóstico.)
     """
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
@@ -188,8 +217,8 @@ def generar_analisis_tendencia_ia(_df_tendencia: pd.DataFrame):
     
     resumen_datos = f"""
     - **Periodo Analizado:** De {primer_periodo['periodo'].strftime('%Y-%m')} a {ultimo_periodo['periodo'].strftime('%Y-%m')}.
-    - **Ingresos:** Evolucionaron de ${primer_periodo['ingresos']:,.0f} a ${ultimo_periodo['ingresos']:,.0f}.
-    - **Utilidad Neta:** Evolucionó de ${primer_periodo['utilidad_neta']:,.0f} a ${ultimo_periodo['utilidad_neta']:,.0f}.
+    - **Ingresos (Estandarizados a positivo):** Evolucionaron de ${primer_periodo['ingresos']:,.0f} a ${ultimo_periodo['ingresos']:,.0f}.
+    - **Utilidad Neta (Positivo=Ganancia):** Evolucionó de ${primer_periodo['utilidad_neta']:,.0f} a ${ultimo_periodo['utilidad_neta']:,.0f}.
     - **Margen Neto:** Evolucionó de {primer_periodo['margen_neto']:.2%} a {ultimo_periodo['margen_neto']:.2%}.
     - **Razón Corriente (Liquidez):** Varió de {primer_periodo['razon_corriente']:.2f} a {ultimo_periodo['razon_corriente']:.2f}.
     - **ROE:** Se movió de {primer_periodo['roe']:.2%} a {ultimo_periodo['roe']:.2%}.
@@ -199,14 +228,16 @@ def generar_analisis_tendencia_ia(_df_tendencia: pd.DataFrame):
     **Rol:** Eres un Analista Financiero Senior y Asesor Estratégico.
 
     **¡REGLA DE ORO Y LÓGICA DE NEGOCIO (INSTRUCCIÓN CRÍTICA E INELUDIBLE)!**
-    - **Valores NEGATIVOS en Ingresos y Utilidades son FAVORABLES y representan GANANCIAS.**
-    - **Valores POSITIVOS en Gastos y Costos son DESFAVORABLES.**
+    - Los datos que te proporciono en el resumen ya están **ESTANDARIZADOS** a la lógica financiera universal.
+    - **Utilidad Neta POSITIVA es GANANCIA ✅.**
+    - **Utilidad Neta NEGATIVA es PÉRDIDA 🔻.**
 
     **INSTRUCCIONES DE INTERPRETACIÓN Y LENGUAJE (¡LA PARTE MÁS IMPORTANTE!):**
-    - Tu tarea más crítica es usar el lenguaje correcto que refleje la lógica del negocio.
-    - Si la utilidad neta evoluciona de -500 a -600, es una **MEJORA y un CRECIMIENTO** en la rentabilidad.
-    - Si los ingresos evolucionan de -1000 a -1200, es un **AUMENTO o CRECIMIENTO** de ingresos del 20%. **NUNCA** lo llames "caída" o "reducción".
-    - Usa siempre un lenguaje que denote crecimiento, aumento o mejora cuando un valor favorable (negativo) se hace más negativo.
+    - Tu tarea es analizar la **TENDENCIA** de estos indicadores estandarizados.
+    - Si la utilidad neta evoluciona de $500 a $600, es una **MEJORA y un CRECIMIENTO** en la rentabilidad.
+    - Si la utilidad neta evoluciona de $500 a -$100, es un **DETERIORO SIGNIFICATIVO**, pasando de ganancia a pérdida.
+    - Si la utilidad neta evoluciona de -$200 a -$100, es una **MEJORA**, ya que la pérdida se redujo.
+    - Describe la evolución de los ingresos como crecimiento o decrecimiento de forma normal.
 
     **Contexto:** Has analizado la evolución financiera de la compañía. Aquí está el resumen de la trayectoria:
     {resumen_datos}
@@ -215,12 +246,11 @@ def generar_analisis_tendencia_ia(_df_tendencia: pd.DataFrame):
     Con base en TODA la información y respetando rigurosamente las reglas de interpretación, genera un informe de evolución.
 
     ### Veredicto Estratégico 📜
-    (En un párrafo, da un veredicto sobre la trayectoria, usando el lenguaje correcto. Ejemplo: "La compañía muestra una tendencia de fuerte crecimiento en sus ingresos, lo cual se ha traducido en una mejora sostenida de la utilidad neta...")
+    (En un párrafo, da un veredicto sobre la trayectoria. Ejemplo: "La compañía muestra una tendencia de crecimiento/decrecimiento en su rentabilidad. La utilidad neta ha mejorado/empeorado, pasando de X a Y en el periodo analizado...")
 
     ### Análisis de Evolución por Área 🔍
-    (Presenta un análisis en lista, describiendo la tendencia y su implicación estratégica, siempre interpretando los signos correctamente.)
-    - **Crecimiento y Rentabilidad:** Analiza si el **crecimiento** de los ingresos se traduce en una **mejora** de la rentabilidad (márgenes y ROE).
-    - **Eficiencia Operativa:** ¿Cómo ha evolucionado la relación entre el **aumento** de ingresos y los gastos operativos?
+    - **Rentabilidad (Utilidad, Márgenes, ROE):** Analiza la tendencia de la rentabilidad. ¿La empresa es más o menos rentable que antes? ¿Por qué?
+    - **Crecimiento y Eficiencia:** ¿El crecimiento de los ingresos se traduce en mayor rentabilidad? ¿O los costos están creciendo más rápido?
     - **Salud y Riesgo Financiero:** ¿La posición de liquidez (Razón Corriente) ha mejorado o empeorado?
 
     ### Prioridades para el Próximo Trimestre 🎯
