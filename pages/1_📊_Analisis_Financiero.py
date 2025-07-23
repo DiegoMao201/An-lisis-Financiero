@@ -1,4 +1,3 @@
-# pages/1_📊_Analisis_Financiero.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -22,11 +21,12 @@ datos_historicos = st.session_state.datos_historicos
 sorted_periods = sorted(datos_historicos.keys(), reverse=True)
 
 # --- Pestañas de Análisis ---
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Análisis Vertical y Horizontal",
     "🏆 Mejor Periodo del Año (IA)",
     "💰 Análisis de Rentabilidad (DuPont)",
-    "🚑 Test Ácido y Ciclo de Efectivo"
+    "🚑 Test Ácido y Ciclo de Efectivo",
+    "📈 Consolidado Histórico"
 ])
 
 # ==============================================================================
@@ -139,7 +139,7 @@ with tab1:
 
 
 # ==============================================================================
-#           PESTAÑA 2: MEJOR PERIODO DEL AÑO (CON IA CORREGIDA)
+#             PESTAÑA 2: MEJOR PERIODO DEL AÑO (CON IA CORREGIDA)
 # ==============================================================================
 with tab2:
     st.header("🏆 Identificación del Periodo de Mejor Desempeño Relativo")
@@ -201,7 +201,7 @@ with tab2:
 
 
 # ==============================================================================
-#           PESTAÑA 3: Sugerencia - Análisis DuPont
+#             PESTAÑA 3: Sugerencia - Análisis DuPont
 # ==============================================================================
 with tab3:
     st.header("💰 Análisis de Rentabilidad (DuPont)")
@@ -229,7 +229,7 @@ with tab3:
         st.info("Un ROE alto es más sostenible si proviene de un buen margen y una alta rotación. Si depende demasiado del apalancamiento, el riesgo financiero es mayor.")
 
 # ==============================================================================
-#           PESTAÑA 4: Sugerencia - Salud Financiera
+#             PESTAÑA 4: Sugerencia - Salud Financiera
 # ==============================================================================
 with tab4:
     st.header("🚑 Test Ácido y Ciclo de Conversión de Efectivo")
@@ -256,3 +256,97 @@ with tab4:
             st.success(f"**Buena señal:** Un Test Ácido de {test_acido:.2f} es saludable. Muestra que la empresa tiene suficientes activos líquidos para operar con tranquilidad a corto plazo, incluso sin contar con la venta de su inventario.")
 
         st.info("La **Prueba Ácida** es un indicador más estricto de la liquidez. Si es mucho menor que la Razón Corriente, significa que la empresa depende fuertemente de sus inventarios para mantenerse a flote.")
+
+
+# ==============================================================================
+#      PESTAÑA 5: ESTADOS FINANCIEROS CONSOLIDADOS CON FILTRO
+# ==============================================================================
+with tab5:
+    st.header("📈 Estados Financieros Consolidados por Periodo y Centro de Costo")
+    st.markdown("""
+    Esta sección te permite consolidar (sumar) todos los periodos históricos para obtener una visión acumulada. 
+    Puedes filtrar por un **Centro de Costo** específico o ver el **Consolidado General** de la compañía.
+    """)
+
+    if 'datos_historicos' in st.session_state and st.session_state.datos_historicos:
+        
+        # --- Lógica para obtener la lista de Centros de Costo ---
+        # Se asume que los dataframes brutos se llaman 'df_er' y 'df_bg' dentro de 'datos_historicos'
+        # y que contienen la columna 'Centro de Costo'.
+        all_cost_centers = set()
+        for period_data in datos_historicos.values():
+            # Intentar obtener centros de costo del estado de resultados
+            if 'df_er' in period_data and 'Centro de Costo' in period_data['df_er'].columns:
+                all_cost_centers.update(period_data['df_er']['Centro de Costo'].unique())
+            # Intentar obtener centros de costo del balance general
+            if 'df_bg' in period_data and 'Centro de Costo' in period_data['df_bg'].columns:
+                 all_cost_centers.update(period_data['df_bg']['Centro de Costo'].unique())
+        
+        # Crear la lista de opciones para el filtro, con "Consolidado" al principio
+        lista_filtros_cc = ["Consolidado"] + sorted(list(all_cost_centers))
+        
+        cc_seleccionado = st.selectbox(
+            "Selecciona un Centro de Costo o el Consolidado General:",
+            options=lista_filtros_cc,
+            key="cc_consolidado_historico"
+        )
+        
+        st.info(f"Mostrando datos para: **{cc_seleccionado}**")
+
+        # --- Lógica de consolidación ---
+        lista_er = []
+        lista_bg = []
+
+        if cc_seleccionado == "Consolidado":
+            # Si se elige "Consolidado", se usan los dataframes master (totales)
+            for periodo, data in datos_historicos.items():
+                if 'df_er_master' in data:
+                    lista_er.append(data['df_er_master'])
+                if 'df_bg_master' in data:
+                    lista_bg.append(data['df_bg_master'])
+        else:
+            # Si se elige un Centro de Costo, se filtran los dataframes brutos
+            for periodo, data in datos_historicos.items():
+                # Filtrar Estado de Resultados
+                if 'df_er' in data:
+                    df_er_filtrado = data['df_er'][data['df_er']['Centro de Costo'] == cc_seleccionado]
+                    if not df_er_filtrado.empty:
+                        lista_er.append(df_er_filtrado)
+                # Filtrar Balance General
+                if 'df_bg' in data:
+                    df_bg_filtrado = data['df_bg'][data['df_bg']['Centro de Costo'] == cc_seleccionado]
+                    if not df_bg_filtrado.empty:
+                        lista_bg.append(df_bg_filtrado)
+
+        # --- Visualización de resultados ---
+        col_er, col_bg = st.columns(2)
+
+        with col_er:
+            st.subheader("Estado de Resultados (Acumulado)")
+            if lista_er:
+                df_er_completo = pd.concat(lista_er, ignore_index=True)
+                df_er_consolidado = df_er_completo.groupby('Cuenta')['Valor'].sum().reset_index()
+                st.dataframe(
+                    df_er_consolidado.style.format({'Valor': "${:,.0f}"}),
+                    use_container_width=True,
+                    height=600 # Altura ajustable
+                )
+            else:
+                st.warning(f"No se encontraron datos del Estado de Resultados para '{cc_seleccionado}'.")
+
+        with col_bg:
+            st.subheader("Balance General (Acumulado)")
+            st.markdown("<small>Nota: La suma de balances de diferentes periodos es conceptualmente inusual.</small>", unsafe_allow_html=True)
+            if lista_bg:
+                df_bg_completo = pd.concat(lista_bg, ignore_index=True)
+                df_bg_consolidado = df_bg_completo.groupby('Cuenta')['Valor'].sum().reset_index()
+                st.dataframe(
+                    df_bg_consolidado.style.format({'Valor': "${:,.0f}"}),
+                    use_container_width=True,
+                    height=600 # Altura ajustable
+                )
+            else:
+                st.warning(f"No se encontraron datos del Balance General para '{cc_seleccionado}'.")
+
+    else:
+        st.error("No hay datos históricos cargados para generar el consolidado.")
