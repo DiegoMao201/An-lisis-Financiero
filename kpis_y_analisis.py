@@ -6,7 +6,6 @@ import streamlit as st
 import google.generativeai as genai
 from mi_logica_original import get_principal_account_value, COL_CONFIG
 import numpy as np
-from typing import Dict, Any
 
 def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: str = 'Todos') -> dict:
     """
@@ -21,6 +20,7 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     er_conf = COL_CONFIG.get('ESTADO_DE_RESULTADOS', {})
     bg_conf = COL_CONFIG.get('BALANCE_GENERAL', {})
 
+    # --- 1. Determinar la columna de valores a utilizar ---
     val_col_kpi = ''
     if cc_filter and cc_filter != 'Todos':
         if cc_filter in df_er.columns:
@@ -49,34 +49,38 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     if not val_col_kpi or val_col_kpi not in df_er.columns:
         return {}
 
+    # --- 2. Extracción y Cálculo del Estado de Resultados (Lógica Estándar) ---
     cuenta_er = er_conf['CUENTA']
-    ingresos = get_principal_account_value(df_er, '4', val_col_kpi, cuenta_er)
-    costo_ventas = get_principal_account_value(df_er, '6', val_col_kpi, cuenta_er)
-    gastos_admin = get_principal_account_value(df_er, '51', val_col_kpi, cuenta_er)
-    gastos_ventas = get_principal_account_value(df_er, '52', val_col_kpi, cuenta_er)
-    costos_prod = get_principal_account_value(df_er, '7', val_col_kpi, cuenta_er)
-    gastos_no_op = get_principal_account_value(df_er, '53', val_col_kpi, cuenta_er)
-    impuestos = get_principal_account_value(df_er, '54', val_col_kpi, cuenta_er)
+    ingresos = get_principal_account_value(df_er, '4', val_col_kpi, cuenta_er)      # Positivo (+)
+    costo_ventas = get_principal_account_value(df_er, '6', val_col_kpi, cuenta_er)  # Negativo (-)
+    gastos_admin = get_principal_account_value(df_er, '51', val_col_kpi, cuenta_er) # Negativo (-)
+    gastos_ventas = get_principal_account_value(df_er, '52', val_col_kpi, cuenta_er)# Negativo (-)
+    costos_prod = get_principal_account_value(df_er, '7', val_col_kpi, cuenta_er)   # Negativo (-)
+    gastos_no_op = get_principal_account_value(df_er, '53', val_col_kpi, cuenta_er) # Negativo (-)
+    impuestos = get_principal_account_value(df_er, '54', val_col_kpi, cuenta_er)    # Negativo (-)
 
+    # El cálculo es una suma directa gracias a la lógica estándar de signos.
     gastos_operativos = gastos_admin + gastos_ventas + costos_prod
     utilidad_bruta = ingresos + costo_ventas
     utilidad_operacional = utilidad_bruta + gastos_operativos
     utilidad_neta = utilidad_operacional + gastos_no_op + impuestos
 
     kpis['ingresos'] = ingresos
-    kpis['costo_ventas'] = abs(costo_ventas)
-    kpis['gastos_operativos'] = abs(gastos_operativos)
+    kpis['costo_ventas'] = abs(costo_ventas) # Se muestra en positivo por convención
+    kpis['gastos_operativos'] = abs(gastos_operativos) # Se muestra en positivo
     kpis['utilidad_bruta'] = utilidad_bruta
     kpis['utilidad_operacional'] = utilidad_operacional
     kpis['utilidad_neta'] = utilidad_neta
 
+    # --- 3. Extracción de Balance General (Lógica de Sistema: Pas/Pat Negativos) ---
     cuenta_bg = bg_conf['CUENTA']
     saldo_final_col = bg_conf['SALDO_FINAL']
 
-    activo_raw = get_principal_account_value(df_bg, '1', saldo_final_col, cuenta_bg)
-    pasivo_raw = get_principal_account_value(df_bg, '2', saldo_final_col, cuenta_bg)
-    patrimonio_raw = get_principal_account_value(df_bg, '3', saldo_final_col, cuenta_bg)
+    activo_raw = get_principal_account_value(df_bg, '1', saldo_final_col, cuenta_bg)      # Positivo (+)
+    pasivo_raw = get_principal_account_value(df_bg, '2', saldo_final_col, cuenta_bg)      # Negativo (-)
+    patrimonio_raw = get_principal_account_value(df_bg, '3', saldo_final_col, cuenta_bg)  # Negativo (-)
 
+    # Se usa abs() para obtener la magnitud real para los ratios.
     activo = activo_raw
     pasivo = abs(pasivo_raw)
     patrimonio = abs(patrimonio_raw)
@@ -88,6 +92,7 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     kpis['pasivo'] = pasivo
     kpis['patrimonio'] = patrimonio
 
+    # --- 4. KPIs Adicionales para el Tablero ---
     activo_corriente = sum([get_principal_account_value(df_bg, c, saldo_final_col, cuenta_bg) for c in ['11','12','13','14']])
     inventarios = get_principal_account_value(df_bg, '14', saldo_final_col, cuenta_bg)
     pasivo_corriente_raw = sum([get_principal_account_value(df_bg, c, saldo_final_col, cuenta_bg) for c in ['21','22','23']])
@@ -97,8 +102,10 @@ def calcular_kpis_periodo(df_er: pd.DataFrame, df_bg: pd.DataFrame, cc_filter: s
     kpis['pasivo_corriente'] = pasivo_corriente
     kpis['inventarios'] = inventarios
 
-    kpis['descuadre_contable'] = activo_raw + pasivo_raw + patrimonio_raw
+    # KPI de Diagnóstico: Ecuación Contable. Debe ser cercano a cero.
+    kpis['descuadre_contable'] = activo_raw + pasivo_raw + patrimonio_raw # Ej: 1000 + (-700) + (-300) = 0
 
+    # --- 5. Cálculo de Ratios Financieros ---
     def safe_divide(numerator, denominator):
         denom_abs = abs(denominator)
         if denom_abs == 0: return 0.0
@@ -188,13 +195,19 @@ def generar_analisis_avanzado_ia(contexto_ia: dict):
     Con base en TODA la información, y poniendo especial atención a la situación patrimonial, genera un informe de diagnóstico y estrategia.
 
     ### Diagnóstico de Viabilidad 🩺
-    (Ofrece un veredicto directo. ¿La empresa es viable? Comienza con la situación patrimonial y el resultado neto.)
+    (Ofrece un veredicto directo. ¿La empresa es viable? Comienza con la situación patrimonial y el resultado neto. Ej: "Diagnóstico: La empresa se encuentra en un estado de **insolvencia técnica**, con un déficit patrimonial de ${kpis.get('patrimonio', 0):,.0f}. La operación del periodo agravó esta situación al generar una **pérdida neta de ${kpis.get('utilidad_neta', 0):,.0f}**, que se restó directamente del ya negativo patrimonio.")
 
     ### Análisis Causa-Raíz 🔬
-    (Conecta los puntos. ¿La rentabilidad del P&L es la causa de la insolvencia del BS?)
+    (Conecta los puntos. ¿La rentabilidad del P&L es la causa de la insolvencia del BS?
+    1.  **Rentabilidad Operativa:** El margen neto de {kpis.get('margen_neto', 0):.2%} indica si el negocio es rentable o no. ¿Esta rentabilidad (o falta de ella) explica la situación patrimonial?
+    2.  **Estructura de Capital:** El ratio Pasivo/Patrimonio de {kpis.get('endeudamiento_patrimonio', 0):.2f} muestra la dependencia de la deuda. ¿Las pérdidas acumuladas han erosionado el patrimonio hasta hacerlo negativo?
+    3.  **Liquidez vs. Solvencia:** La Razón Corriente es de {kpis.get('razon_corriente', 0):.2f}. ¿Puede la empresa pagar sus deudas a corto plazo, a pesar de ser insolvente a largo plazo?)
 
     ### Plan de Acción Estratégico 💡
-    (Proporciona 3 recomendaciones jerarquizadas para abordar la situación.)
+    (Proporciona 3 recomendaciones jerarquizadas para abordar la situación.
+    1.  **Acción Inmediata (Frenar la Pérdida):** ¿Qué ajuste operativo, basado en el P&L, es prioritario? (Ej: Reducir el costo de ventas en un 5% para mejorar el margen bruto; recortar gastos de ventas que no generan retorno).
+    2.  **Acción a Mediano Plazo (Restaurar la Solvencia):** ¿Cómo se soluciona el problema del Balance General? (Ej: Plan de desinversión de activos no estratégicos para pagar deuda y reducir el pasivo; negociar una quita de deuda con acreedores).
+    3.  **Acción a Largo Plazo (Recapitalización):** ¿De dónde vendrá el dinero nuevo? (Ej: Búsqueda activa de un socio capitalista para una inyección de capital de $Y, necesaria para restaurar el patrimonio a positivo).)
     """
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
@@ -204,11 +217,8 @@ def generar_analisis_avanzado_ia(contexto_ia: dict):
     except Exception as e:
         return f"🔴 **Error al contactar la IA:** {e}"
 
-# =========================================================
-# ⭐️ FUNCIÓN CORREGIDA ⭐️
-# =========================================================
 @st.cache_data(show_spinner=False)
-def generar_analisis_tendencia_ia(contexto: Dict[str, Any]): # Acepta un diccionario
+def generar_analisis_tendencia_ia(_df_tendencia: pd.DataFrame):
     """
     Genera un análisis de EVOLUCIÓN y TENDENCIA con IA, instruida sobre la lógica mixta.
     """
@@ -218,31 +228,22 @@ def generar_analisis_tendencia_ia(contexto: Dict[str, Any]): # Acepta un diccion
     except Exception:
         return "🔴 **Error:** No se encontró la clave de API de Google AI."
 
-    # --- PASO 1: Extraer y convertir los datos del contexto ---
-    datos_tendencia_lista = contexto.get("datos_tendencia", [])
-    _df_tendencia = pd.DataFrame(datos_tendencia_lista)
-
-    # Convertir la columna 'periodo' a datetime si existe
-    if 'periodo' in _df_tendencia.columns:
-        _df_tendencia['periodo'] = pd.to_datetime(_df_tendencia['periodo'])
-
-    # --- PASO 2: Realizar la validación sobre el DataFrame ---
     if _df_tendencia.empty or len(_df_tendencia) < 2:
         return "ℹ️ Se necesitan al menos dos periodos para un análisis de tendencia."
 
-    # --- PASO 3: Construir el prompt como antes ---
     primer_periodo = _df_tendencia.iloc[0]
     ultimo_periodo = _df_tendencia.iloc[-1]
     
-    evolucion_patrimonial = f"El patrimonio neto (déficit) evolucionó de ${primer_periodo.get('patrimonio_raw', 0):,.0f} a ${ultimo_periodo.get('patrimonio_raw', 0):,.0f}."
+    # La trayectoria de la insolvencia es el dato más importante
+    evolucion_patrimonial = f"El patrimonio neto (déficit) evolucionó de ${primer_periodo['patrimonio_raw']:,.0f} a ${ultimo_periodo['patrimonio_raw']:,.0f}."
 
     resumen_datos = f"""
     - **Horizonte de Análisis:** De {primer_periodo['periodo'].strftime('%Y-%m')} a {ultimo_periodo['periodo'].strftime('%Y-%m')}.
     - **Evolución del Patrimonio (Insolvencia):** {evolucion_patrimonial}
-    - **Utilidad Neta:** Evolucionó de ${primer_periodo.get('utilidad_neta', 0):,.0f} a ${ultimo_periodo.get('utilidad_neta', 0):,.0f}.
-    - **Ingresos:** Crecieron de ${primer_periodo.get('ingresos', 0):,.0f} a ${ultimo_periodo.get('ingresos', 0):,.0f}.
-    - **Margen Neto:** Cambió de {primer_periodo.get('margen_neto', 0):.2%} a {ultimo_periodo.get('margen_neto', 0):.2%}.
-    - **Endeudamiento (Pasivo/Patrimonio):** Varió de {primer_periodo.get('endeudamiento_patrimonio', 0):.2f} a {ultimo_periodo.get('endeudamiento_patrimonio', 0):.2f}.
+    - **Utilidad Neta:** Evolucionó de ${primer_periodo['utilidad_neta']:,.0f} a ${ultimo_periodo['utilidad_neta']:,.0f}.
+    - **Ingresos:** Crecieron de ${primer_periodo['ingresos']:,.0f} a ${ultimo_periodo['ingresos']:,.0f}.
+    - **Margen Neto:** Cambió de {primer_periodo['margen_neto']:.2%} a {ultimo_periodo['margen_neto']:.2%}.
+    - **Endeudamiento (Pasivo/Patrimonio):** Varió de {primer_periodo['endeudamiento_patrimonio']:.2f} a {ultimo_periodo['endeudamiento_patrimonio']:.2f}.
     """
 
     prompt = f"""
@@ -261,15 +262,15 @@ def generar_analisis_tendencia_ia(contexto: Dict[str, Any]): # Acepta un diccion
     Genera un informe de evolución estratégica, enfocándote en la viabilidad a largo plazo.
 
     ### Veredicto Estratégico de la Trayectoria 📜
-    (En un párrafo, da un veredicto claro sobre la tendencia. ¿La empresa se acerca a la viabilidad o se hunde más en la insolvencia?)
+    (En un párrafo, da un veredicto claro sobre la tendencia. ¿La empresa se acerca a la viabilidad o se hunde más en la insolvencia? Ej: "La trayectoria de la compañía es preocupante. Aunque los ingresos muestran un ligero crecimiento, la rentabilidad sigue siendo negativa, lo que ha provocado que el déficit patrimonial se incremente de X a Y, haciendo a la empresa aún más insolvente.")
 
     ### Análisis de Evolución por Dimensión 🔍
-    - **Solvencia y Rentabilidad:** ¿La tendencia de la utilidad neta es positiva? ¿Es suficiente para revertir el déficit patrimonial?
-    - **Estructura de Capital:** ¿Cómo ha evolucionado el ratio Pasivo/Patrimonio?
-    - **Operación:** ¿La tendencia del margen neto muestra una mejora en la eficiencia operativa?
+    - **Solvencia y Rentabilidad:** ¿La tendencia de la utilidad neta es positiva? ¿Es suficiente para revertir el déficit patrimonial? ¿O las pérdidas continúan erosionando la base de la empresa?
+    - **Estructura de Capital:** ¿Cómo ha evolucionado el ratio Pasivo/Patrimonio? ¿La dependencia de la deuda está aumentando o disminuyendo?
+    - **Operación:** ¿La tendencia del margen neto muestra una mejora en la eficiencia operativa o un deterioro?
 
     ### Prioridades Estratégicas Basadas en la Tendencia 🎯
-    (Basado en la evolución, define 2-3 prioridades.)
+    (Basado en la evolución, define 2-3 prioridades. Ej: "1. **Revertir la Tendencia de Pérdidas:** Es la máxima prioridad. Implementar un plan de choque para alcanzar el punto de equilibrio en 6 meses. 2. **Negociar con Acreedores:** La tendencia muestra que la deuda es insostenible; es crucial iniciar un proceso de reestructuración de pasivos.")
     """
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
