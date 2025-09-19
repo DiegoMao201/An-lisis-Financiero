@@ -27,7 +27,7 @@ from analisis_adicional import calcular_analisis_vertical, calcular_analisis_hor
 # Las funciones de análisis y visualización están diseñadas para interpretar esta lógica.
 
 # ==============================================================================
-#             NUEVA FUNCIÓN PARA EXCEL PROFESIONAL (CORREGIDA Y MODULAR)
+#         NUEVA FUNCIÓN PARA EXCEL PROFESIONAL (CORREGIDA Y MODULAR)
 # ==============================================================================
 
 def _escribir_hoja_resumen(writer, datos_periodo, periodo_actual_str, formats):
@@ -69,19 +69,27 @@ def _escribir_hoja_resumen(writer, datos_periodo, periodo_actual_str, formats):
     ws.set_column('A:A', 25)
     ws.set_column('B:Z', 18)
 
-def _escribir_hoja_er(writer, df_er_master, formats):
+# ▼▼▼ FUNCIÓN CORREGIDA ▼▼▼
+# Ahora acepta el parámetro 'nivel_detalle'
+def _escribir_hoja_er(writer, df_er_master, formats, nivel_detalle: int):
     """Función auxiliar para escribir la hoja de Estado de Resultados."""
     ws = writer.book.add_worksheet('Estado de Resultados')
     er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
     cuenta_col = er_conf.get('CUENTA', 'Cuenta')
-    desc_col = er_conf.get('DESCRIPCION_CUENTA', 'Título')
+    # Corregido: El nombre de la columna en el config es NOMBRE_CUENTA
+    desc_col = er_conf.get('NOMBRE_CUENTA', 'Título') 
     nivel_col = er_conf.get('NIVEL_LINEA', 'Grupo')
 
-    df_er_filtrado = df_er_master[df_er_master[nivel_col] <= 4].copy()
+    # ▼▼▼ CORRECCIÓN APLICADA ▼▼▼
+    # Se reemplaza el valor fijo '4' por el parámetro 'nivel_detalle'
+    df_er_filtrado = df_er_master[df_er_master[nivel_col] <= nivel_detalle].copy()
+    
     df_reporte_er = df_er_filtrado[[cuenta_col, desc_col, nivel_col]].drop_duplicates().sort_values(cuenta_col)
 
     cc_cols_er = [name for name in er_conf.get('CENTROS_COSTO_COLS', {}).values() if name in df_er_master]
-    cc_cols_er.append('Total_Consolidado_ER')
+    # Asegurémonos de que 'Total_Consolidado_ER' exista antes de añadirlo si no está
+    if 'Total_Consolidado_ER' in df_er_master.columns and 'Total_Consolidado_ER' not in cc_cols_er:
+        cc_cols_er.append('Total_Consolidado_ER')
 
     for cc in sorted(cc_cols_er):
         if cc in df_er_master:
@@ -97,18 +105,23 @@ def _escribir_hoja_er(writer, df_er_master, formats):
 
     for row_num, record in enumerate(df_reporte_er.to_dict('records'), start=1):
         nivel = record.get(nivel_col, 99)
-        row_format = formats['nivel4'] if nivel == 4 else None
-
+        # Identificamos los totales por el nivel más alto de la jerarquía (ej. nivel 1)
+        # O por los niveles de subtotal que definamos (ej. nivel 4)
+        is_total_row = nivel <= 1 
+        
+        row_format = formats['nivel4'] if is_total_row else None
+        cell_format_currency = formats['total'] if is_total_row else formats['currency']
+        
         ws.write(row_num, 0, record[cuenta_col], row_format)
         ws.write(row_num, 1, record[desc_col], row_format)
 
         for col_num, cc_name in enumerate(cc_cols_sorted, start=2):
-            cell_format = formats['total'] if nivel == 4 else formats['currency']
-            ws.write(row_num, col_num, record[cc_name], cell_format)
+            ws.write(row_num, col_num, record[cc_name], cell_format_currency)
 
     ws.set_column('A:A', 12)
     ws.set_column('B:B', 40)
     ws.set_column('C:Z', 18)
+
 
 def _escribir_hoja_bg(writer, df_bg_master, formats):
     """Función auxiliar para escribir la hoja de Balance General."""
@@ -125,32 +138,28 @@ def _escribir_hoja_bg(writer, df_bg_master, formats):
 
         ws.write(row_num, 0, cuenta_val)
         ws.write(row_num, 1, record.get('Descripción', ''))
-
-        # =======================================================================
-        # ▼▼▼ AQUÍ ESTÁ LA NUEVA CORRECCIÓN (MÁS ROBUSTA) ▼▼▼
-        # Esta lógica ahora maneja correctamente los valores nulos (None) y
-        # también los valores NaN (Not a Number) que pueden venir de pandas.
-        # =======================================================================
+        
         valor_crudo = record.get('Valor')
         
-        # pd.isna() es la forma más segura de comprobar si un valor es nulo o NaN.
         if pd.isna(valor_crudo):
-            valor_celda = 0  # Si es nulo o NaN, lo reemplazamos por 0.
+            valor_celda = 0
         else:
-            valor_celda = valor_crudo # Si es un número válido, lo usamos.
+            valor_celda = valor_crudo
         
         ws.write(row_num, 2, valor_celda, cell_format)
-        # =======================================================================
 
     ws.set_column('A:A', 15)
     ws.set_column('B:B', 45)
     ws.set_column('C:C', 20)
 
+# ▼▼▼ FUNCIÓN CORREGIDA ▼▼▼
+# Ahora acepta el parámetro 'nivel_detalle_er'
 def generar_excel_gerencial_profesional(
     df_er_master: pd.DataFrame,
     df_bg_master: pd.DataFrame,
     datos_periodo: Dict[str, Any],
-    periodo_actual_str: str
+    periodo_actual_str: str,
+    nivel_detalle_er: int  # <-- Nuevo parámetro
 ) -> bytes:
     """
     Crea un archivo Excel profesional y gerencial con múltiples pestañas y formato avanzado.
@@ -174,7 +183,9 @@ def generar_excel_gerencial_profesional(
 
         # Llamar a cada función para construir su respectiva hoja
         _escribir_hoja_resumen(writer, datos_periodo, periodo_actual_str, formats)
-        _escribir_hoja_er(writer, df_er_master, formats)
+        # ▼▼▼ CORRECCIÓN APLICADA ▼▼▼
+        # Se pasa el nuevo parámetro a la función que escribe la hoja del ER
+        _escribir_hoja_er(writer, df_er_master, formats, nivel_detalle_er)
         _escribir_hoja_bg(writer, df_bg_master, formats)
 
     buffer.seek(0)
@@ -214,7 +225,7 @@ def calcular_variaciones_er(df_actual: pd.DataFrame, df_previo: pd.DataFrame, cc
     """Calcula las variaciones absolutas y porcentuales para el Estado de Resultados."""
     er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
     cuenta_col = er_conf.get('CUENTA', 'Cuenta')
-    desc_col = er_conf.get('DESCRIPCION_CUENTA', 'Título')
+    desc_col = er_conf.get('NOMBRE_CUENTA', 'Título') # Corregido para coincidir con config
     valor_col_nombre = 'Total_Consolidado_ER' if cc_filter == 'Todos' else cc_filter
 
     required_cols_actual = [cuenta_col, desc_col, valor_col_nombre]
@@ -363,7 +374,7 @@ period_options = ["Análisis de Evolución (Tendencias)"] + sorted_periods
 selected_view = st.sidebar.selectbox("Selecciona la vista de análisis:", period_options)
 
 # ==============================================================================
-#                  VISTA DE ANÁLISIS DE TENDENCIAS
+#                 VISTA DE ANÁLISIS DE TENDENCIAS
 # ==============================================================================
 if selected_view == "Análisis de Evolución (Tendencias)":
     st.header("📈 Informe de Evolución Gerencial")
@@ -434,10 +445,11 @@ else:
     er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
     nivel_col = er_conf.get('NIVEL_LINEA', 'Grupo')
     if nivel_col in df_er_actual.columns:
-        max_nivel = int(df_er_actual[nivel_col].max())
-        nivel_seleccionado = st.sidebar.slider("Nivel de Detalle de Cuentas:", 1, max_nivel, 1, key=f"nivel_er_{selected_view}")
+        # Asegurarse de que el nivel máximo es un número válido
+        max_nivel = int(pd.to_numeric(df_er_actual[nivel_col], errors='coerce').max())
+        nivel_seleccionado = st.sidebar.slider("Nivel de Detalle de Cuentas:", 1, max_nivel, 4, key=f"nivel_er_{selected_view}")
     else:
-        nivel_seleccionado = 1
+        nivel_seleccionado = 4 # Valor por defecto si la columna no existe
 
     st.sidebar.subheader("Buscador de Cuentas")
     search_account_input = st.sidebar.text_input("Buscar por número de cuenta:", key=f"search_{selected_view}", placeholder="Ej: 510506")
@@ -528,7 +540,7 @@ else:
         else:
             if valor_col_nombre in df_er_actual.columns and cuenta_col in df_er_actual.columns:
                 df_ingresos = df_er_actual[df_er_actual[cuenta_col].astype(str).str.startswith('4')]
-                desc_col_name = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('DESCRIPCION_CUENTA', 'Título')
+                desc_col_name = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('NOMBRE_CUENTA', 'Título')
                 st.bar_chart(data=df_ingresos.set_index(desc_col_name)[valor_col_nombre])
                 st.dataframe(df_ingresos[[desc_col_name, valor_col_nombre]], use_container_width=True)
 
@@ -540,7 +552,7 @@ else:
         if valor_col_nombre in df_er_actual.columns and cuenta_col in df_er_actual.columns:
             df_gastos = df_er_actual[df_er_actual[cuenta_col].astype(str).str.startswith('5')]
             st.markdown("#### Composición de Gastos del Periodo")
-            desc_col_name = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('DESCRIPCION_CUENTA', 'Título')
+            desc_col_name = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('NOMBRE_CUENTA', 'Título')
 
             fig_treemap = px.treemap(df_gastos, path=[desc_col_name], values=df_gastos[valor_col_nombre].abs(),
                                      title='Distribución de Gastos Operacionales',
@@ -625,11 +637,14 @@ else:
                 st.info(f"No se encontraron cuentas en el BG para '{search_account_input}'.")
 
     st.sidebar.markdown("---")
+    # ▼▼▼ CORRECCIÓN APLICADA ▼▼▼
+    # Se pasa el 'nivel_seleccionado' del slider a la función de generación de Excel.
     excel_buffer_profesional = generar_excel_gerencial_profesional(
         df_er_master=df_er_actual,
         df_bg_master=df_bg_actual,
         datos_periodo=data_actual,
-        periodo_actual_str=selected_view
+        periodo_actual_str=selected_view,
+        nivel_detalle_er=nivel_seleccionado # <-- Parámetro añadido
     )
     st.sidebar.download_button(
         label=f"📥 Descargar Reporte Gerencial",
