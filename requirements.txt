@@ -6,3 +6,4 @@ dropbox
 plotly
 google-generativeai
 matplotlib
+xlsxwriter
