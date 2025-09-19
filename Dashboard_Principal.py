@@ -28,7 +28,7 @@ from analisis_adicional import calcular_analisis_vertical, calcular_analisis_hor
 # Las funciones de análisis y visualización están diseñadas para interpretar esta lógica.
 
 # ==============================================================================
-#         NUEVA FUNCIÓN PARA CONSOLIDACIÓN ANUAL (CORREGIDA)
+#     FUNCIÓN PARA CONSOLIDACIÓN ANUAL (EXISTENTE)
 # ==============================================================================
 def consolidar_datos_anuales(datos_historicos: Dict[str, Any], anio: int) -> Optional[Dict[str, Any]]:
     """
@@ -66,8 +66,6 @@ def consolidar_datos_anuales(datos_historicos: Dict[str, Any], anio: int) -> Opt
             columnas_a_sumar_er.append(col)
 
     for periodo in periodos_del_anio:
-        # ▼▼▼ CORRECCIÓN APLICADA ▼▼▼
-        # Se corrigió el nombre de la variable de 'df_er_list' a 'df_er_anual_list'
         df_er_anual_list.append(datos_historicos[periodo]['df_er_master'])
 
     df_er_anual = pd.concat(df_er_anual_list)
@@ -100,7 +98,72 @@ def consolidar_datos_anuales(datos_historicos: Dict[str, Any], anio: int) -> Opt
     return datos_anuales_consolidados
 
 # ==============================================================================
-#           NUEVA FUNCIÓN PARA EXCEL PROFESIONAL (CORREGIDA Y MODULAR)
+#    ✅  NUEVA FUNCIÓN PARA CONSOLIDACIÓN TOTAL DE DATOS CARGADOS ✅
+# ==============================================================================
+def consolidar_datos_totales(datos_historicos: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Consolida TODOS los datos históricos cargados en la sesión.
+
+    Args:
+        datos_historicos: El diccionario con todos los datos cargados.
+
+    Returns:
+        Un diccionario con los DataFrames y KPIs consolidados de todo el histórico.
+    """
+    if not datos_historicos:
+        st.warning("No hay datos históricos para consolidar.")
+        return None
+
+    todos_los_periodos = sorted(datos_historicos.keys())
+    st.info(f"Iniciando consolidado total de {len(todos_los_periodos)} periodos...")
+
+    # --- Consolidación del Estado de Resultados (P&L) ---
+    # Se suman los valores de TODOS los meses cargados.
+    df_er_total_list = []
+    er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
+    cuenta_col_er = er_conf.get('CUENTA', 'Cuenta')
+    desc_col_er = er_conf.get('NOMBRE_CUENTA', 'Título')
+    nivel_col_er = er_conf.get('NIVEL_LINEA', 'Grupo')
+    cc_cols = er_conf.get('CENTROS_COSTO_COLS', {}).values()
+
+    # Identificar columnas a sumar desde el primer DF disponible
+    primer_periodo = todos_los_periodos[0]
+    primer_df_er = datos_historicos[primer_periodo]['df_er_master']
+    columnas_a_sumar_er = [col for col in primer_df_er.columns if col in cc_cols or col == 'Total_Consolidado_ER']
+
+    for periodo in todos_los_periodos:
+        df_er_total_list.append(datos_historicos[periodo]['df_er_master'])
+
+    df_er_total = pd.concat(df_er_total_list)
+    
+    columnas_agrupacion_er = [cuenta_col_er, desc_col_er, nivel_col_er]
+    columnas_agrupacion_er_validas = [col for col in columnas_agrupacion_er if col in df_er_total.columns]
+    
+    df_er_total = df_er_total.groupby(columnas_agrupacion_er_validas, as_index=False)[columnas_a_sumar_er].sum()
+
+    # --- Consolidación del Balance General (BS) ---
+    # Se toma el balance del ÚLTIMO periodo cargado.
+    ultimo_periodo_total = todos_los_periodos[-1]
+    df_bg_total = datos_historicos[ultimo_periodo_total]['df_bg_master'].copy()
+
+    # --- Recalcular KPIs para el consolidado total ---
+    kpis_totales = {'Todos': calcular_kpis_periodo(df_er_total, df_bg_total, 'Todos')}
+    
+    cc_cols_kpis = [name for name in er_conf.get('CENTROS_COSTO_COLS', {}).values() if name in df_er_total and name not in ['Total_Consolidado_ER', 'Sin centro de coste']]
+    for cc in cc_cols_kpis:
+        kpis_totales[cc] = calcular_kpis_periodo(df_er_total, df_bg_total, cc)
+        
+    datos_totales_consolidados = {
+        'df_er_master': df_er_total,
+        'df_bg_master': df_bg_total,
+        'kpis': kpis_totales
+    }
+
+    return datos_totales_consolidados
+
+
+# ==============================================================================
+#     FUNCIÓN PARA EXCEL PROFESIONAL (Original, sin cambios)
 # ==============================================================================
 
 def _escribir_hoja_resumen(writer, datos_periodo, periodo_actual_str, formats):
@@ -252,7 +315,7 @@ def generar_excel_gerencial_profesional(
 
 
 # ==============================================================================
-#           FUNCIONES AUXILIARES DE ANÁLISIS Y VISUALIZACIÓN (Originales)
+#     FUNCIONES AUXILIARES DE ANÁLISIS Y VISUALIZACIÓN (Originales)
 # ==============================================================================
 
 def plot_sparkline(data: pd.Series, title: str, is_percent: bool = False, lower_is_better: bool = False):
@@ -357,7 +420,7 @@ def plot_waterfall_utilidad_neta(df_variacion: pd.DataFrame, periodo_actual: str
     return fig
 
 # ==============================================================================
-#               CONFIGURACIÓN DE PÁGINA Y AUTENTICACIÓN
+#     CONFIGURACIÓN DE PÁGINA Y AUTENTICACIÓN
 # ==============================================================================
 st.set_page_config(layout="wide", page_title="Análisis Financiero Inteligente PRO")
 st.title("🤖 Dashboard Financiero Profesional con IA")
@@ -380,7 +443,7 @@ if not st.session_state.authenticated:
         st.stop()
 
 # ==============================================================================
-#               CARGA DE DATOS AUTOMÁTICA DESDE DROPBOX
+#     CARGA DE DATOS AUTOMÁTICA DESDE DROPBOX
 # ==============================================================================
 @st.cache_data(ttl=3600)
 def cargar_y_procesar_datos():
@@ -425,13 +488,12 @@ if not st.session_state.datos_historicos:
     st.stop()
 
 # ==============================================================================
-#                 INTERFAZ DE USUARIO PRINCIPAL
+#     INTERFAZ DE USUARIO PRINCIPAL
 # ==============================================================================
 st.sidebar.title("Opciones de Análisis")
 sorted_periods = sorted(st.session_state.datos_historicos.keys(), reverse=True)
 
-# ▼▼▼ BLOQUE CORREGIDO PARA EVITAR EL ERROR 'ValueError' ▼▼▼
-# Este bloque ahora maneja de forma segura los periodos que no tengan el formato 'YYYYMM'.
+# Bloque corregido para evitar el error 'ValueError'
 valid_years = []
 for period_str in sorted_periods:
     try:
@@ -439,8 +501,7 @@ for period_str in sorted_periods:
         year = pd.to_datetime(period_str, format='%Y%m').year
         valid_years.append(year)
     except ValueError:
-        # Si una cadena no coincide con el formato (ej. archivo mal nombrado),
-        # se ignora para no detener la aplicación.
+        # Si una cadena no coincide con el formato, se ignora.
         st.warning(f"Se ignoró un periodo con formato inválido encontrado: '{period_str}'")
         continue
 
@@ -462,8 +523,39 @@ if selected_view == "Análisis Anual":
     else:
         st.sidebar.error("No hay años con datos válidos para analizar.")
         st.stop()
+        
 # ==============================================================================
-#                 VISTA DE ANÁLISIS DE TENDENCIAS
+#     ✅ NUEVA SECCIÓN PARA DESCARGA DE CONSOLIDADO TOTAL ✅
+# ==============================================================================
+st.sidebar.markdown("---")
+if st.sidebar.button("📥 Descargar Consolidado Total", use_container_width=True, type="primary"):
+    # 1. Llamar a la nueva función de consolidación total
+    datos_consolidados_totales = consolidar_datos_totales(st.session_state.datos_historicos)
+    
+    if datos_consolidados_totales:
+        # 2. Generar el buffer de Excel con los datos totales
+        excel_buffer_total = generar_excel_gerencial_profesional(
+            df_er_master=datos_consolidados_totales['df_er_master'],
+            df_bg_master=datos_consolidados_totales['df_bg_master'],
+            datos_periodo=datos_consolidados_totales,
+            periodo_actual_str="Consolidado Total",
+            nivel_detalle_er=4 # Usamos un nivel de detalle por defecto
+        )
+        
+        # 3. Crear el botón de descarga en un 'st.empty' para que aparezca
+        #    y luego pueda ser reemplazado o desaparecido si es necesario.
+        download_placeholder = st.sidebar.empty()
+        download_placeholder.download_button(
+            label="✅ ¡Listo! Haz clic para descargar",
+            data=excel_buffer_total,
+            file_name="Reporte_Gerencial_Consolidado_Total.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+        st.sidebar.success("Reporte consolidado total generado.")
+
+# ==============================================================================
+#     VISTA DE ANÁLISIS DE TENDENCIAS
 # ==============================================================================
 if selected_view == "Análisis de Evolución (Tendencias)":
     st.header("📈 Informe de Evolución Gerencial")
@@ -510,7 +602,7 @@ if selected_view == "Análisis de Evolución (Tendencias)":
     st.plotly_chart(fig_combinada, use_container_width=True)
 
 # ==============================================================================
-#       VISTA DE PERIODO ÚNICO O ANUAL (CENTRO DE ANÁLISIS PROFUNDO)
+#   VISTA DE PERIODO ÚNICO O ANUAL (CENTRO DE ANÁLISIS PROFUNDO)
 # ==============================================================================
 else:
     st.header(f"Centro de Análisis para: {selected_view}")
@@ -609,7 +701,7 @@ else:
                 st.markdown("✅ **Impactos Positivos (Ayudaron a la Utilidad)**")
                 st.dataframe(top_favorables[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict).background_gradient(cmap='Greens', subset=['Variacion_Absoluta']), use_container_width=True)
             with col2:
-                st.markdown("❌ **Impactos Negativos (Perjudicaron la Utilidad)**")
+                st.markdown("❌ **Impactos Negativos (Perjudicar</strong>")
                 st.dataframe(top_desfavorables[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict).background_gradient(cmap='Reds_r', subset=['Variacion_Absoluta']), use_container_width=True)
         else:
             st.info("Se requiere un periodo/año anterior para este análisis.")
@@ -728,10 +820,9 @@ else:
     file_name_prefix = "Reporte_Gerencial_Anual" if is_annual_view else "Reporte_Gerencial_Mensual"
     
     st.sidebar.download_button(
-        label=f"📥 Descargar Reporte Gerencial",
+        label=f"📥 Descargar Reporte de {selected_view}",
         data=excel_buffer_profesional,
         file_name=f"{file_name_prefix}_{selected_view.replace(' ', '_')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-        type="primary"
+        use_container_width=True
     )
