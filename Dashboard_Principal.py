@@ -27,8 +27,114 @@ from analisis_adicional import calcular_analisis_vertical, calcular_analisis_hor
 # Las funciones de análisis y visualización están diseñadas para interpretar esta lógica.
 
 # ==============================================================================
-#                       NUEVA FUNCIÓN PARA EXCEL PROFESIONAL
+#            NUEVA FUNCIÓN PARA EXCEL PROFESIONAL (CORREGIDA Y MODULAR)
 # ==============================================================================
+
+def _escribir_hoja_resumen(writer, datos_periodo, periodo_actual_str, formats):
+    """Función auxiliar para escribir la hoja de Resumen Gerencial en el Excel."""
+    ws = writer.book.add_worksheet('Resumen Gerencial')
+    kpis_por_cc = datos_periodo['kpis']
+    cc_list = sorted(kpis_por_cc.keys())
+
+    kpi_data = {
+        "Indicador": [
+            "Utilidad Neta", "Ingresos Totales", "Gastos Operativos", "Margen Neto",
+            "ROE", "Razón Corriente", "Endeudamiento del Activo"
+        ]
+    }
+    for cc in cc_list:
+        kpis = kpis_por_cc.get(cc, {})
+        kpi_data[cc] = [
+            kpis.get('utilidad_neta', 0), kpis.get('ingresos', 0), kpis.get('gastos_operativos', 0),
+            kpis.get('margen_neto', 0), kpis.get('roe', 0), kpis.get('razon_corriente', 0),
+            kpis.get('endeudamiento_activo', 0)
+        ]
+    
+    df_kpis = pd.DataFrame(kpi_data)
+    
+    ws.merge_range(0, 0, 0, len(cc_list), f"Resumen Gerencial - Periodo: {periodo_actual_str}", formats['header'])
+    for col_num, value in enumerate(df_kpis.columns.values):
+        ws.write(2, col_num, value, formats['header'])
+
+    for row_num, row_data in enumerate(df_kpis.itertuples(index=False), start=3):
+        ws.write(row_num, 0, row_data[0])
+        for col_num, cell_data in enumerate(row_data[1:], start=1):
+            if any(kpi in row_data[0] for kpi in ["Margen", "ROE", "Endeudamiento"]):
+                ws.write(row_num, col_num, cell_data, formats['percent'])
+            elif "Razón" in row_data[0]:
+                ws.write(row_num, col_num, cell_data, formats['decimal'])
+            else:
+                ws.write(row_num, col_num, cell_data, formats['currency'])
+
+    ws.set_column('A:A', 25)
+    ws.set_column('B:Z', 18)
+
+def _escribir_hoja_er(writer, df_er_master, formats):
+    """Función auxiliar para escribir la hoja de Estado de Resultados."""
+    ws = writer.book.add_worksheet('Estado de Resultados')
+    er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
+    cuenta_col = er_conf.get('CUENTA', 'Cuenta')
+    desc_col = er_conf.get('DESCRIPCION_CUENTA', 'Título')
+    nivel_col = er_conf.get('NIVEL_LINEA', 'Grupo')
+
+    df_er_filtrado = df_er_master[df_er_master[nivel_col] <= 4].copy()
+    df_reporte_er = df_er_filtrado[[cuenta_col, desc_col, nivel_col]].drop_duplicates().sort_values(cuenta_col)
+    
+    cc_cols_er = [name for name in er_conf.get('CENTROS_COSTO_COLS', {}).values() if name in df_er_master]
+    cc_cols_er.append('Total_Consolidado_ER')
+
+    for cc in sorted(cc_cols_er):
+        if cc in df_er_master:
+            df_cc_data = df_er_master[[cuenta_col, cc]].copy()
+            df_reporte_er = pd.merge(df_reporte_er, df_cc_data, on=cuenta_col, how='left')
+
+    # --- INICIO DE LA CORRECCIÓN CLAVE (ANTI-KeyError) ---
+    cc_cols_sorted = sorted(cc_cols_er)
+    final_cols = [cuenta_col, desc_col, nivel_col] + cc_cols_sorted
+    df_reporte_er = df_reporte_er.reindex(columns=final_cols).fillna(0) # Usar reindex para garantizar todas las columnas
+
+    # Usar las variables de configuración para los encabezados, no texto fijo.
+    er_headers = [cuenta_col, desc_col] + cc_cols_sorted
+    ws.write_row(0, 0, er_headers, formats['header'])
+    
+    for row_num, record in enumerate(df_reporte_er.to_dict('records'), start=1):
+        nivel = record.get(nivel_col, 99)
+        row_format = formats['nivel4'] if nivel == 4 else None
+        
+        ws.write(row_num, 0, record[cuenta_col], row_format)
+        ws.write(row_num, 1, record[desc_col], row_format)
+        
+        # Este bucle ahora es 100% seguro porque la estructura del DataFrame fue forzada.
+        for col_num, cc_name in enumerate(cc_cols_sorted, start=2):
+            cell_format = formats['total'] if nivel == 4 else formats['currency']
+            ws.write(row_num, col_num, record[cc_name], cell_format)
+    # --- FIN DE LA CORRECCIÓN ---
+
+    ws.set_column('A:A', 12)
+    ws.set_column('B:B', 40)
+    ws.set_column('C:Z', 18)
+
+def _escribir_hoja_bg(writer, df_bg_master, formats):
+    """Función auxiliar para escribir la hoja de Balance General."""
+    ws = writer.book.add_worksheet('Balance General')
+    df_bg_display = generate_financial_statement(df_bg_master, 'Balance General', 99)
+    
+    bg_headers = ['Cuenta', 'Descripción', 'Valor']
+    ws.write_row(0, 0, bg_headers, formats['header'])
+    
+    for row_num, record in enumerate(df_bg_display.to_dict('records'), start=1):
+        # Usar .get() para evitar errores si una clave no existe.
+        cuenta_val = record.get('Cuenta', '')
+        is_total = not str(cuenta_val).isdigit()
+        cell_format = formats['total'] if is_total else formats['currency']
+        
+        ws.write(row_num, 0, cuenta_val)
+        ws.write(row_num, 1, record.get('Descripción'))
+        ws.write(row_num, 2, record.get('Valor'), cell_format)
+        
+    ws.set_column('A:A', 15)
+    ws.set_column('B:B', 45)
+    ws.set_column('C:C', 20)
 
 def generar_excel_gerencial_profesional(
     df_er_master: pd.DataFrame, 
@@ -38,135 +144,28 @@ def generar_excel_gerencial_profesional(
 ) -> bytes:
     """
     Crea un archivo Excel profesional y gerencial con múltiples pestañas y formato avanzado.
-    - Hoja 1: Resumen Gerencial con KPIs por Centro de Costo.
-    - Hoja 2: Estado de Resultados detallado, con columnas por CC y totales.
-    - Hoja 3: Balance General consolidado y formateado.
+    Utiliza funciones auxiliares para cada hoja para mayor claridad y mantenibilidad.
     """
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
         workbook = writer.book
         
-        # --- DEFINICIÓN DE FORMATOS ---
-        header_format = workbook.add_format({
-            'bold': True, 'text_wrap': True, 'valign': 'top', 
-            'fg_color': '#1F497D', 'font_color': 'white', 'border': 1
-        })
-        currency_format = workbook.add_format({'num_format': '$#,##0;[Red]($#,##0)'})
-        percent_format = workbook.add_format({'num_format': '0.00%'})
-        total_format = workbook.add_format({'bold': True, 'num_format': '$#,##0;[Red]($#,##0)', 'top': 1, 'bottom': 1})
-        nivel4_format = workbook.add_format({'bold': True})
-
-        # ==================================================================
-        # Hoja 1: RESUMEN GERENCIAL (KPIs)
-        # ==================================================================
-        ws_resumen = workbook.add_worksheet('Resumen Gerencial')
-        
-        kpis_por_cc = datos_periodo['kpis']
-        cc_list = sorted(kpis_por_cc.keys())
-
-        # Preparar datos para el DataFrame de KPIs
-        kpi_data = {
-            "Indicador": [
-                "Utilidad Neta", "Ingresos Totales", "Gastos Operativos", "Margen Neto",
-                "ROE", "Razón Corriente", "Endeudamiento del Activo"
-            ]
+        formats = {
+            'header': workbook.add_format({
+                'bold': True, 'text_wrap': True, 'valign': 'top', 'align': 'center',
+                'fg_color': '#1F497D', 'font_color': 'white', 'border': 1
+            }),
+            'currency': workbook.add_format({'num_format': '$#,##0;[Red]($#,##0)'}),
+            'percent': workbook.add_format({'num_format': '0.00%'}),
+            'decimal': workbook.add_format({'num_format': '0.00'}),
+            'total': workbook.add_format({'bold': True, 'num_format': '$#,##0;[Red]($#,##0)', 'top': 1, 'bottom': 1}),
+            'nivel4': workbook.add_format({'bold': True})
         }
-        for cc in cc_list:
-            kpis = kpis_por_cc.get(cc, {})
-            kpi_data[cc] = [
-                kpis.get('utilidad_neta', 0), kpis.get('ingresos', 0), kpis.get('gastos_operativos', 0),
-                kpis.get('margen_neto', 0), kpis.get('roe', 0), kpis.get('razon_corriente', 0),
-                kpis.get('endeudamiento_activo', 0)
-            ]
-        
-        df_kpis = pd.DataFrame(kpi_data)
-        
-        # Escribir encabezados
-        ws_resumen.write(0, 0, f"Resumen Gerencial - Periodo: {periodo_actual_str}", header_format)
-        ws_resumen.merge_range(0, 0, 0, len(cc_list), f"Resumen Gerencial - Periodo: {periodo_actual_str}", header_format)
 
-        for col_num, value in enumerate(df_kpis.columns.values):
-            ws_resumen.write(2, col_num, value, header_format)
-
-        # Escribir datos con formato condicional
-        for row_num, row_data in enumerate(df_kpis.itertuples(index=False), start=3):
-            ws_resumen.write(row_num, 0, row_data[0]) # Nombre del KPI
-            for col_num, cell_data in enumerate(row_data[1:], start=1):
-                if "Margen" in row_data[0] or "ROE" in row_data[0] or "Endeudamiento" in row_data[0]:
-                    ws_resumen.write(row_num, col_num, cell_data, percent_format)
-                elif "Razón" in row_data[0]:
-                     ws_resumen.write(row_num, col_num, cell_data, workbook.add_format({'num_format': '0.00'}))
-                else:
-                    ws_resumen.write(row_num, col_num, cell_data, currency_format)
-
-        ws_resumen.set_column('A:A', 25) # Ancho columna de Indicadores
-        ws_resumen.set_column('B:Z', 18) # Ancho columnas de CCs
-
-        # ==================================================================
-        # Hoja 2: ESTADO DE RESULTADOS
-        # ==================================================================
-        ws_er = workbook.add_worksheet('Estado de Resultados')
-        er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
-        cuenta_col = er_conf.get('CUENTA', 'Cuenta')
-        desc_col = er_conf.get('DESCRIPCION_CUENTA', 'Título')
-        nivel_col = er_conf.get('NIVEL_LINEA', 'Grupo')
-
-        # Filtrar por cuentas de nivel 4 o inferior para un reporte gerencial
-        df_er_filtrado = df_er_master[df_er_master[nivel_col] <= 4].copy()
-        
-        # Crear la base del reporte
-        df_reporte_er = df_er_filtrado[[cuenta_col, desc_col, nivel_col]].drop_duplicates().sort_values(cuenta_col)
-        
-        cc_cols_er = [name for name in er_conf.get('CENTROS_COSTO_COLS', {}).values() if name in df_er_master]
-        cc_cols_er.append('Total_Consolidado_ER') # Añadir el total
-
-        for cc in sorted(cc_cols_er):
-             if cc in df_er_master:
-                df_cc_data = df_er_master[[cuenta_col, cc]].copy()
-                df_reporte_er = pd.merge(df_reporte_er, df_cc_data, on=cuenta_col, how='left')
-
-        df_reporte_er = df_reporte_er.fillna(0)
-
-        # Escribir al Excel
-        er_headers = ['Cuenta', 'Descripción'] + sorted(cc_cols_er)
-        ws_er.write_row(0, 0, er_headers, header_format)
-        
-        for row_num, record in enumerate(df_reporte_er.to_dict('records'), start=1):
-            nivel = record.get(nivel_col, 99)
-            row_format = nivel4_format if nivel == 4 else None
-            
-            ws_er.write(row_num, 0, record[cuenta_col], row_format)
-            ws_er.write(row_num, 1, record[desc_col], row_format)
-            
-            for col_num, cc_name in enumerate(sorted(cc_cols_er), start=2):
-                cell_format = total_format if nivel == 4 else currency_format
-                ws_er.write(row_num, col_num, record[cc_name], cell_format)
-
-        ws_er.set_column('A:A', 12)
-        ws_er.set_column('B:B', 40)
-        ws_er.set_column('C:Z', 18)
-
-        # ==================================================================
-        # Hoja 3: BALANCE GENERAL
-        # ==================================================================
-        ws_bg = workbook.add_worksheet('Balance General')
-        
-        df_bg_display = generate_financial_statement(df_bg_master, 'Balance General', 99)
-        
-        bg_headers = ['Cuenta', 'Descripción', 'Valor']
-        ws_bg.write_row(0, 0, bg_headers, header_format)
-        
-        for row_num, record in enumerate(df_bg_display.to_dict('records'), start=1):
-            is_total = not str(record['Cuenta']).isdigit()
-            cell_format = total_format if is_total else currency_format
-            
-            ws_bg.write(row_num, 0, record['Cuenta'])
-            ws_bg.write(row_num, 1, record['Descripción'])
-            ws_bg.write(row_num, 2, record['Valor'], cell_format)
-            
-        ws_bg.set_column('A:A', 15)
-        ws_bg.set_column('B:B', 45)
-        ws_bg.set_column('C:C', 20)
+        # Llamar a cada función para construir su respectiva hoja
+        _escribir_hoja_resumen(writer, datos_periodo, periodo_actual_str, formats)
+        _escribir_hoja_er(writer, df_er_master, formats)
+        _escribir_hoja_bg(writer, df_bg_master, formats)
         
     buffer.seek(0)
     return buffer.getvalue()
@@ -252,7 +251,6 @@ def plot_waterfall_utilidad_neta(df_variacion: pd.DataFrame, periodo_actual: str
         st.error(f"Columna '{cuenta_col}' no existe en datos de variación para cascada.")
         return go.Figure()
 
-    # La utilidad neta es ahora la suma directa de los valores actuales y previos
     utilidad_neta_actual = df_variacion['Valor_actual'].sum()
     utilidad_neta_previa = df_variacion['Valor_previo'].sum()
 
@@ -271,9 +269,8 @@ def plot_waterfall_utilidad_neta(df_variacion: pd.DataFrame, periodo_actual: str
         text=[""] + textos + [""],
         y=[utilidad_neta_previa, variacion_ingresos, variacion_costos, variacion_gastos, otras_variaciones, utilidad_neta_actual],
         connector={"line": {"color": "rgb(63, 63, 63)"}},
-        # CORRECCIÓN: Con P&L estándar, un AUMENTO en variación es favorable, una DISMINUCIÓN es desfavorable.
-        increasing={"marker": {"color": "#28a745"}},  # Favorable (ej: más ingresos, menos gastos)
-        decreasing={"marker": {"color": "#dc3545"}},  # Desfavorable (ej: menos ingresos, más gastos)
+        increasing={"marker": {"color": "#28a745"}},
+        decreasing={"marker": {"color": "#dc3545"}},
     ))
     fig.update_layout(title=f"Puente de Utilidad Neta: {periodo_previo} vs {periodo_actual}", showlegend=False, yaxis_title="Monto (COP)", height=500)
     fig.update_yaxes(tickformat="$,.0f")
@@ -393,7 +390,6 @@ if selected_view == "Análisis de Evolución (Tendencias)":
     st.subheader("Evolución de Componentes Financieros Principales")
 
     fig_combinada = go.Figure()
-    # Usamos .abs() para visualización, ya que los gastos son negativos.
     fig_combinada.add_trace(go.Bar(x=df_tendencia['periodo'], y=df_tendencia['ingresos'], name='Ingresos', marker_color='#28a745'))
     fig_combinada.add_trace(go.Bar(x=df_tendencia['periodo'], y=df_tendencia['gastos_operativos'].abs(), name='Gastos Operativos', marker_color='#ffc107'))
     fig_combinada.add_trace(go.Scatter(x=df_tendencia['periodo'], y=df_tendencia['utilidad_neta'], name='Utilidad Neta', mode='lines+markers', line=dict(color='#0d6efd', width=4)))
@@ -409,7 +405,6 @@ if selected_view == "Análisis de Evolución (Tendencias)":
 else:
     st.header(f"Centro de Análisis para el Periodo: {selected_view}")
     
-    # --- Preparación de Datos ---
     data_actual = st.session_state.datos_historicos.get(selected_view)
     if not data_actual:
         st.error(f"No se encontraron datos para el periodo: {selected_view}"); st.stop()
@@ -422,7 +417,6 @@ else:
     df_bg_actual = data_actual['df_bg_master']
     kpis_por_tienda = data_actual['kpis']
 
-    # --- Filtros en Sidebar ---
     st.sidebar.subheader("Filtros del Periodo")
     cc_options_all = sorted(list(kpis_por_tienda.keys()))
     cc_filter = st.sidebar.selectbox("Filtrar por Centro de Costo:", cc_options_all, key=f"cc_{selected_view}")
@@ -438,7 +432,6 @@ else:
     st.sidebar.subheader("Buscador de Cuentas")
     search_account_input = st.sidebar.text_input("Buscar por número de cuenta:", key=f"search_{selected_view}", placeholder="Ej: 510506")
     
-    # --- Cálculo de Variaciones ---
     df_variacion_er = None
     if data_previa:
         df_variacion_er = calcular_variaciones_er(df_er_actual, data_previa['df_er_master'], cc_filter)
@@ -447,7 +440,6 @@ else:
     else:
         st.warning("No hay un periodo anterior para realizar análisis comparativo.")
 
-    # --- Pestañas de Análisis Detallado ---
     tab_gen, tab_utilidad, tab_ing, tab_gas, tab_roe, tab_rep = st.tabs([
         "📊 Resumen General", "💰 Análisis de Utilidad Neta", "📈 Análisis de Ingresos", 
         "🧾 Análisis de Gastos", "🎯 Análisis ROE (DuPont)", "📋 Reportes Financieros"
@@ -466,7 +458,6 @@ else:
         st.markdown("---")
         with st.expander("🧠 **Ver Análisis y Consejos del CFO Virtual (IA)**", expanded=True):
             with st.spinner('El CFO Virtual está preparando un análisis profundo...'):
-                # CORRECCIÓN: El contexto para la IA ahora refleja la lógica mixta.
                 contexto_ia = {
                     "kpis": selected_kpis, "periodo": selected_view, "centro_costo": cc_filter,
                     "convencion_contable": (
@@ -477,7 +468,6 @@ else:
                     "variaciones_favorables": [], "variaciones_desfavorables": []
                 }
                 if df_variacion_er is not None and not df_variacion_er.empty:
-                    # CORRECCIÓN: Favorable es la mayor variación positiva. Desfavorable es la más negativa.
                     top_favorables = df_variacion_er.nlargest(5, 'Variacion_Absoluta')
                     top_desfavorables = df_variacion_er.nsmallest(5, 'Variacion_Absoluta')
                     if 'Descripción' in top_favorables.columns and 'Variacion_Absoluta' in top_favorables.columns:
@@ -496,7 +486,6 @@ else:
             st.markdown("#### Principales Motores del Cambio vs. Periodo Anterior")
             col1, col2 = st.columns(2)
             
-            # CORRECCIÓN: La lógica para identificar impactos se alinea con P&L estándar.
             top_favorables = df_variacion_er[df_variacion_er['Variacion_Absoluta'] > 0].sort_values('Variacion_Absoluta', ascending=False).head(10)
             top_favorables = top_favorables[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']]
             
@@ -509,7 +498,7 @@ else:
                 st.markdown("✅ **Impactos Positivos (Ayudaron a la Utilidad)**")
                 st.dataframe(top_favorables.style.format(format_dict).background_gradient(cmap='Greens', subset=['Variacion_Absoluta']), use_container_width=True)
             with col2:
-                st.markdown("❌ **Impactos Negativos (Perjudicarion la Utilidad)**")
+                st.markdown("❌ **Impactos Negativos (Perjudicaron la Utilidad)**")
                 st.dataframe(top_desfavorables.style.format(format_dict).background_gradient(cmap='Reds_r', subset=['Variacion_Absoluta']), use_container_width=True)
         else:
             st.info("Se requiere un periodo anterior para este análisis.")
@@ -529,7 +518,7 @@ else:
         else:
             if valor_col_nombre in df_er_actual.columns and cuenta_col in df_er_actual.columns:
                 df_ingresos = df_er_actual[df_er_actual[cuenta_col].astype(str).str.startswith('4')]
-                desc_col_name = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('DESCRIPCION_CUenta', 'Título')
+                desc_col_name = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('DESCRIPCION_CUENTA', 'Título')
                 st.bar_chart(data=df_ingresos.set_index(desc_col_name)[valor_col_nombre])
                 st.dataframe(df_ingresos[[desc_col_name, valor_col_nombre]], use_container_width=True)
     
@@ -542,7 +531,7 @@ else:
             df_gastos = df_er_actual[df_er_actual[cuenta_col].astype(str).str.startswith('5')]
             st.markdown("#### Composición de Gastos del Periodo")
             desc_col_name = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('DESCRIPCION_CUENTA', 'Título')
-            # Usamos .abs() para que el treemap no falle con valores negativos.
+            
             fig_treemap = px.treemap(df_gastos, path=[desc_col_name], values=df_gastos[valor_col_nombre].abs(),
                                      title='Distribución de Gastos Operacionales',
                                      color=df_gastos[valor_col_nombre].abs(),
@@ -561,7 +550,6 @@ else:
         st.subheader("🎯 Análisis de Rentabilidad (ROE) con Modelo DuPont")
         kpis_actuales = kpis_por_tienda.get(cc_filter, {})
         
-        # Esta sección ya estaba bien definida y no necesita cambios lógicos.
         if data_previa:
             kpis_previos = data_previa['kpis'].get(cc_filter, {})
             dupont_data = {
@@ -592,7 +580,6 @@ else:
         df_bg_display = generate_financial_statement(df_bg_actual, 'Balance General', 99)
         st.dataframe(df_bg_display.style.format({'Valor': "${:,.0f}"}), use_container_width=True, height=600)
     
-        # --- Pestaña de Flujo de Caja Añadida ---
         st.markdown("#### Estado de Flujo de Caja (Método Indirecto)")
         if data_previa:
             with st.spinner("Construyendo Flujo de Caja..."):
@@ -628,8 +615,6 @@ else:
                 st.info(f"No se encontraron cuentas en el BG para '{search_account_input}'.")
 
     st.sidebar.markdown("---")
-    # --- SECCIÓN DE DESCARGA MODIFICADA ---
-    # Se eliminó la llamada a las funciones anteriores y ahora se usa la nueva función.
     excel_buffer_profesional = generar_excel_gerencial_profesional(
         df_er_master=df_er_actual,
         df_bg_master=df_bg_actual,
