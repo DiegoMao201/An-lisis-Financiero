@@ -98,7 +98,7 @@ def consolidar_datos_anuales(datos_historicos: Dict[str, Any], anio: int) -> Opt
     return datos_anuales_consolidados
 
 # ==============================================================================
-#    ✅  NUEVA FUNCIÓN PARA CONSOLIDACIÓN TOTAL DE DATOS CARGADOS ✅
+#     ✅  NUEVA FUNCIÓN PARA CONSOLIDACIÓN TOTAL DE DATOS CARGADOS ✅
 # ==============================================================================
 def consolidar_datos_totales(datos_historicos: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
@@ -493,16 +493,24 @@ if not st.session_state.datos_historicos:
 st.sidebar.title("Opciones de Análisis")
 sorted_periods = sorted(st.session_state.datos_historicos.keys(), reverse=True)
 
-# Bloque corregido para evitar el error 'ValueError'
+# ==============================================================================
+#      ✅ BLOQUE CORREGIDO PARA ANÁLISIS ANUAL ✅
+# ==============================================================================
+# Este bloque ahora extrae el año directamente del nombre del periodo (ej. '2025_01')
+# sin depender de un formato de fecha estricto, solucionando el error.
 valid_years = []
 for period_str in sorted_periods:
     try:
-        # Intenta convertir la cadena a fecha para extraer el año
-        year = pd.to_datetime(period_str, format='%Y%m').year
-        valid_years.append(year)
-    except ValueError:
-        # Si una cadena no coincide con el formato, se ignora.
-        st.warning(f"Se ignoró un periodo con formato inválido encontrado: '{period_str}'")
+        # Extrae los primeros 4 caracteres, que deben ser el año.
+        year = int(str(period_str)[:4])
+        # Una pequeña validación para asegurar que es un año sensato.
+        if 2000 <= year < 2100:
+            valid_years.append(year)
+        else:
+            st.warning(f"Se ignoró un periodo con un año fuera de rango: '{period_str}'")
+    except (ValueError, IndexError):
+        # Captura errores si el formato es completamente inesperado.
+        st.warning(f"Se ignoró un periodo con formato de año inválido: '{period_str}'")
         continue
 
 # Obtenemos la lista única y ordenada de años válidos.
@@ -602,7 +610,7 @@ if selected_view == "Análisis de Evolución (Tendencias)":
     st.plotly_chart(fig_combinada, use_container_width=True)
 
 # ==============================================================================
-#   VISTA DE PERIODO ÚNICO O ANUAL (CENTRO DE ANÁLISIS PROFUNDO)
+#    VISTA DE PERIODO ÚNICO O ANUAL (CENTRO DE ANÁLISIS PROFUNDO)
 # ==============================================================================
 else:
     st.header(f"Centro de Análisis para: {selected_view}")
@@ -701,7 +709,7 @@ else:
                 st.markdown("✅ **Impactos Positivos (Ayudaron a la Utilidad)**")
                 st.dataframe(top_favorables[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict).background_gradient(cmap='Greens', subset=['Variacion_Absoluta']), use_container_width=True)
             with col2:
-                st.markdown("❌ **Impactos Negativos (Perjudicar</strong>")
+                st.markdown("❌ **Impactos Negativos (Perjudicaron la Utilidad)**")
                 st.dataframe(top_desfavorables[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict).background_gradient(cmap='Reds_r', subset=['Variacion_Absoluta']), use_container_width=True)
         else:
             st.info("Se requiere un periodo/año anterior para este análisis.")
