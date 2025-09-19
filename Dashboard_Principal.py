@@ -1,4 +1,3 @@
-# Dashboard_Principal.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -27,7 +26,7 @@ from analisis_adicional import calcular_analisis_vertical, calcular_analisis_hor
 # Las funciones de análisis y visualización están diseñadas para interpretar esta lógica.
 
 # ==============================================================================
-#            NUEVA FUNCIÓN PARA EXCEL PROFESIONAL (CORREGIDA Y MODULAR)
+#             NUEVA FUNCIÓN PARA EXCEL PROFESIONAL (CORREGIDA Y MODULAR)
 # ==============================================================================
 
 def _escribir_hoja_resumen(writer, datos_periodo, periodo_actual_str, formats):
@@ -129,8 +128,15 @@ def _escribir_hoja_bg(writer, df_bg_master, formats):
         cell_format = formats['total'] if is_total else formats['currency']
         
         ws.write(row_num, 0, cuenta_val)
-        ws.write(row_num, 1, record.get('Descripción'))
-        ws.write(row_num, 2, record.get('Valor'), cell_format)
+        ws.write(row_num, 1, record.get('Descripción', '')) # Default a string vacío
+        
+        # =======================================================================
+        # ▼▼▼ AQUÍ ESTÁ LA CORRECCIÓN ▼▼▼
+        # Se añade ", 0" a .get('Valor') para que si el valor es None (nulo),
+        # se escriba un 0 en la celda, evitando el TypeError.
+        # =======================================================================
+        valor_celda = record.get('Valor', 0)
+        ws.write(row_num, 2, valor_celda, cell_format)
         
     ws.set_column('A:A', 15)
     ws.set_column('B:B', 45)
@@ -172,7 +178,7 @@ def generar_excel_gerencial_profesional(
 
 
 # ==============================================================================
-#            FUNCIONES AUXILIARES DE ANÁLISIS Y VISUALIZACIÓN (Originales)
+#           FUNCIONES AUXILIARES DE ANÁLISIS Y VISUALIZACIÓN (Originales)
 # ==============================================================================
 
 def plot_sparkline(data: pd.Series, title: str, is_percent: bool = False, lower_is_better: bool = False):
@@ -345,7 +351,7 @@ if not st.session_state.datos_historicos:
     st.stop()
 
 # ==============================================================================
-#                       INTERFAZ DE USUARIO PRINCIPAL
+#                     INTERFAZ DE USUARIO PRINCIPAL
 # ==============================================================================
 st.sidebar.title("Opciones de Análisis")
 sorted_periods = sorted(st.session_state.datos_historicos.keys(), reverse=True)
@@ -353,7 +359,7 @@ period_options = ["Análisis de Evolución (Tendencias)"] + sorted_periods
 selected_view = st.sidebar.selectbox("Selecciona la vista de análisis:", period_options)
 
 # ==============================================================================
-#                    VISTA DE ANÁLISIS DE TENDENCIAS
+#                  VISTA DE ANÁLISIS DE TENDENCIAS
 # ==============================================================================
 if selected_view == "Análisis de Evolución (Tendencias)":
     st.header("📈 Informe de Evolución Gerencial")
@@ -400,7 +406,7 @@ if selected_view == "Análisis de Evolución (Tendencias)":
     st.plotly_chart(fig_combinada, use_container_width=True)
 
 # ==============================================================================
-#            VISTA DE PERIODO ÚNICO (CENTRO DE ANÁLISIS PROFUNDO)
+#           VISTA DE PERIODO ÚNICO (CENTRO DE ANÁLISIS PROFUNDO)
 # ==============================================================================
 else:
     st.header(f"Centro de Análisis para el Periodo: {selected_view}")
@@ -498,7 +504,7 @@ else:
                 st.markdown("✅ **Impactos Positivos (Ayudaron a la Utilidad)**")
                 st.dataframe(top_favorables.style.format(format_dict).background_gradient(cmap='Greens', subset=['Variacion_Absoluta']), use_container_width=True)
             with col2:
-                st.markdown("❌ **Impactos Negativos (Perjudicaron la Utilidad)**")
+                st.markdown("❌ **Impactos Negativos (Perjudicarion la Utilidad)**")
                 st.dataframe(top_desfavorables.style.format(format_dict).background_gradient(cmap='Reds_r', subset=['Variacion_Absoluta']), use_container_width=True)
         else:
             st.info("Se requiere un periodo anterior para este análisis.")
