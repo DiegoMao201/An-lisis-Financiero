@@ -63,7 +63,7 @@ def consolidar_datos_anuales(datos_historicos: Dict[str, Any], anio: int) -> Opt
     primer_df_er = datos_historicos[periodos_del_anio[0]]['df_er_master']
     for col in primer_df_er.columns:
         if col in cc_cols or col == 'Total_Consolidado_ER':
-             columnas_a_sumar_er.append(col)
+            columnas_a_sumar_er.append(col)
 
     for periodo in periodos_del_anio:
         # ▼▼▼ CORRECCIÓN APLICADA ▼▼▼
@@ -357,7 +357,7 @@ def plot_waterfall_utilidad_neta(df_variacion: pd.DataFrame, periodo_actual: str
     return fig
 
 # ==============================================================================
-#                 CONFIGURACIÓN DE PÁGINA Y AUTENTICACIÓN
+#               CONFIGURACIÓN DE PÁGINA Y AUTENTICACIÓN
 # ==============================================================================
 st.set_page_config(layout="wide", page_title="Análisis Financiero Inteligente PRO")
 st.title("🤖 Dashboard Financiero Profesional con IA")
@@ -425,7 +425,7 @@ if not st.session_state.datos_historicos:
     st.stop()
 
 # ==============================================================================
-#                   INTERFAZ DE USUARIO PRINCIPAL
+#                 INTERFAZ DE USUARIO PRINCIPAL
 # ==============================================================================
 st.sidebar.title("Opciones de Análisis")
 sorted_periods = sorted(st.session_state.datos_historicos.keys(), reverse=True)
@@ -463,7 +463,7 @@ if selected_view == "Análisis Anual":
         st.sidebar.error("No hay años con datos válidos para analizar.")
         st.stop()
 # ==============================================================================
-#               VISTA DE ANÁLISIS DE TENDENCIAS
+#                 VISTA DE ANÁLISIS DE TENDENCIAS
 # ==============================================================================
 if selected_view == "Análisis de Evolución (Tendencias)":
     st.header("📈 Informe de Evolución Gerencial")
@@ -609,7 +609,8 @@ else:
                 st.markdown("✅ **Impactos Positivos (Ayudaron a la Utilidad)**")
                 st.dataframe(top_favorables[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict).background_gradient(cmap='Greens', subset=['Variacion_Absoluta']), use_container_width=True)
             with col2:
-                st.markdown("❌ **Impactos Negativos (Perjudicaron la Utilidad)**")
+                st.markdown("❌ **Impactos Negativos (Perjudicar
+on la Utilidad)**")
                 st.dataframe(top_desfavorables[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict).background_gradient(cmap='Reds_r', subset=['Variacion_Absoluta']), use_container_width=True)
         else:
             st.info("Se requiere un periodo/año anterior para este análisis.")
