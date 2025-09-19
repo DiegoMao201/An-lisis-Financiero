@@ -4,9 +4,11 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from typing import Dict, Any
+import io # Necesario para el nuevo buffer de Excel
 
 # --- Importamos nuestros módulos ---
-from mi_logica_original import procesar_archivo_excel, generate_financial_statement, to_excel_buffer, COL_CONFIG
+# Asegúrate de que estos archivos .py estén en la misma carpeta
+from mi_logica_original import procesar_archivo_excel, generate_financial_statement, COL_CONFIG
 from dropbox_connector import get_dropbox_client, find_financial_files, load_excel_from_dropbox
 from kpis_y_analisis import calcular_kpis_periodo, preparar_datos_tendencia, generar_analisis_avanzado_ia, generar_analisis_tendencia_ia
 from analisis_adicional import calcular_analisis_vertical, calcular_analisis_horizontal, construir_flujo_de_caja
@@ -25,7 +27,153 @@ from analisis_adicional import calcular_analisis_vertical, calcular_analisis_hor
 # Las funciones de análisis y visualización están diseñadas para interpretar esta lógica.
 
 # ==============================================================================
-#                           FUNCIONES AUXILIARES DE ANÁLISIS Y VISUALIZACIÓN
+#                       NUEVA FUNCIÓN PARA EXCEL PROFESIONAL
+# ==============================================================================
+
+def generar_excel_gerencial_profesional(
+    df_er_master: pd.DataFrame, 
+    df_bg_master: pd.DataFrame, 
+    datos_periodo: Dict[str, Any],
+    periodo_actual_str: str
+) -> bytes:
+    """
+    Crea un archivo Excel profesional y gerencial con múltiples pestañas y formato avanzado.
+    - Hoja 1: Resumen Gerencial con KPIs por Centro de Costo.
+    - Hoja 2: Estado de Resultados detallado, con columnas por CC y totales.
+    - Hoja 3: Balance General consolidado y formateado.
+    """
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        workbook = writer.book
+        
+        # --- DEFINICIÓN DE FORMATOS ---
+        header_format = workbook.add_format({
+            'bold': True, 'text_wrap': True, 'valign': 'top', 
+            'fg_color': '#1F497D', 'font_color': 'white', 'border': 1
+        })
+        currency_format = workbook.add_format({'num_format': '$#,##0;[Red]($#,##0)'})
+        percent_format = workbook.add_format({'num_format': '0.00%'})
+        total_format = workbook.add_format({'bold': True, 'num_format': '$#,##0;[Red]($#,##0)', 'top': 1, 'bottom': 1})
+        nivel4_format = workbook.add_format({'bold': True})
+
+        # ==================================================================
+        # Hoja 1: RESUMEN GERENCIAL (KPIs)
+        # ==================================================================
+        ws_resumen = workbook.add_worksheet('Resumen Gerencial')
+        
+        kpis_por_cc = datos_periodo['kpis']
+        cc_list = sorted(kpis_por_cc.keys())
+
+        # Preparar datos para el DataFrame de KPIs
+        kpi_data = {
+            "Indicador": [
+                "Utilidad Neta", "Ingresos Totales", "Gastos Operativos", "Margen Neto",
+                "ROE", "Razón Corriente", "Endeudamiento del Activo"
+            ]
+        }
+        for cc in cc_list:
+            kpis = kpis_por_cc.get(cc, {})
+            kpi_data[cc] = [
+                kpis.get('utilidad_neta', 0), kpis.get('ingresos', 0), kpis.get('gastos_operativos', 0),
+                kpis.get('margen_neto', 0), kpis.get('roe', 0), kpis.get('razon_corriente', 0),
+                kpis.get('endeudamiento_activo', 0)
+            ]
+        
+        df_kpis = pd.DataFrame(kpi_data)
+        
+        # Escribir encabezados
+        ws_resumen.write(0, 0, f"Resumen Gerencial - Periodo: {periodo_actual_str}", header_format)
+        ws_resumen.merge_range(0, 0, 0, len(cc_list), f"Resumen Gerencial - Periodo: {periodo_actual_str}", header_format)
+
+        for col_num, value in enumerate(df_kpis.columns.values):
+            ws_resumen.write(2, col_num, value, header_format)
+
+        # Escribir datos con formato condicional
+        for row_num, row_data in enumerate(df_kpis.itertuples(index=False), start=3):
+            ws_resumen.write(row_num, 0, row_data[0]) # Nombre del KPI
+            for col_num, cell_data in enumerate(row_data[1:], start=1):
+                if "Margen" in row_data[0] or "ROE" in row_data[0] or "Endeudamiento" in row_data[0]:
+                    ws_resumen.write(row_num, col_num, cell_data, percent_format)
+                elif "Razón" in row_data[0]:
+                     ws_resumen.write(row_num, col_num, cell_data, workbook.add_format({'num_format': '0.00'}))
+                else:
+                    ws_resumen.write(row_num, col_num, cell_data, currency_format)
+
+        ws_resumen.set_column('A:A', 25) # Ancho columna de Indicadores
+        ws_resumen.set_column('B:Z', 18) # Ancho columnas de CCs
+
+        # ==================================================================
+        # Hoja 2: ESTADO DE RESULTADOS
+        # ==================================================================
+        ws_er = workbook.add_worksheet('Estado de Resultados')
+        er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
+        cuenta_col = er_conf.get('CUENTA', 'Cuenta')
+        desc_col = er_conf.get('DESCRIPCION_CUENTA', 'Título')
+        nivel_col = er_conf.get('NIVEL_LINEA', 'Grupo')
+
+        # Filtrar por cuentas de nivel 4 o inferior para un reporte gerencial
+        df_er_filtrado = df_er_master[df_er_master[nivel_col] <= 4].copy()
+        
+        # Crear la base del reporte
+        df_reporte_er = df_er_filtrado[[cuenta_col, desc_col, nivel_col]].drop_duplicates().sort_values(cuenta_col)
+        
+        cc_cols_er = [name for name in er_conf.get('CENTROS_COSTO_COLS', {}).values() if name in df_er_master]
+        cc_cols_er.append('Total_Consolidado_ER') # Añadir el total
+
+        for cc in sorted(cc_cols_er):
+             if cc in df_er_master:
+                df_cc_data = df_er_master[[cuenta_col, cc]].copy()
+                df_reporte_er = pd.merge(df_reporte_er, df_cc_data, on=cuenta_col, how='left')
+
+        df_reporte_er = df_reporte_er.fillna(0)
+
+        # Escribir al Excel
+        er_headers = ['Cuenta', 'Descripción'] + sorted(cc_cols_er)
+        ws_er.write_row(0, 0, er_headers, header_format)
+        
+        for row_num, record in enumerate(df_reporte_er.to_dict('records'), start=1):
+            nivel = record.get(nivel_col, 99)
+            row_format = nivel4_format if nivel == 4 else None
+            
+            ws_er.write(row_num, 0, record[cuenta_col], row_format)
+            ws_er.write(row_num, 1, record[desc_col], row_format)
+            
+            for col_num, cc_name in enumerate(sorted(cc_cols_er), start=2):
+                cell_format = total_format if nivel == 4 else currency_format
+                ws_er.write(row_num, col_num, record[cc_name], cell_format)
+
+        ws_er.set_column('A:A', 12)
+        ws_er.set_column('B:B', 40)
+        ws_er.set_column('C:Z', 18)
+
+        # ==================================================================
+        # Hoja 3: BALANCE GENERAL
+        # ==================================================================
+        ws_bg = workbook.add_worksheet('Balance General')
+        
+        df_bg_display = generate_financial_statement(df_bg_master, 'Balance General', 99)
+        
+        bg_headers = ['Cuenta', 'Descripción', 'Valor']
+        ws_bg.write_row(0, 0, bg_headers, header_format)
+        
+        for row_num, record in enumerate(df_bg_display.to_dict('records'), start=1):
+            is_total = not str(record['Cuenta']).isdigit()
+            cell_format = total_format if is_total else currency_format
+            
+            ws_bg.write(row_num, 0, record['Cuenta'])
+            ws_bg.write(row_num, 1, record['Descripción'])
+            ws_bg.write(row_num, 2, record['Valor'], cell_format)
+            
+        ws_bg.set_column('A:A', 15)
+        ws_bg.set_column('B:B', 45)
+        ws_bg.set_column('C:C', 20)
+        
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+# ==============================================================================
+#            FUNCIONES AUXILIARES DE ANÁLISIS Y VISUALIZACIÓN (Originales)
 # ==============================================================================
 
 def plot_sparkline(data: pd.Series, title: str, is_percent: bool = False, lower_is_better: bool = False):
@@ -132,7 +280,7 @@ def plot_waterfall_utilidad_neta(df_variacion: pd.DataFrame, periodo_actual: str
     return fig
 
 # ==============================================================================
-#                      CONFIGURACIÓN DE PÁGINA Y AUTENTICACIÓN
+#                 CONFIGURACIÓN DE PÁGINA Y AUTENTICACIÓN
 # ==============================================================================
 st.set_page_config(layout="wide", page_title="Análisis Financiero Inteligente PRO")
 st.title("🤖 Dashboard Financiero Profesional con IA")
@@ -155,7 +303,7 @@ if not st.session_state.authenticated:
         st.stop()
 
 # ==============================================================================
-#                    CARGA DE DATOS AUTOMÁTICA DESDE DROPBOX
+#               CARGA DE DATOS AUTOMÁTICA DESDE DROPBOX
 # ==============================================================================
 @st.cache_data(ttl=3600)
 def cargar_y_procesar_datos():
@@ -200,7 +348,7 @@ if not st.session_state.datos_historicos:
     st.stop()
 
 # ==============================================================================
-#                           INTERFAZ DE USUARIO PRINCIPAL
+#                       INTERFAZ DE USUARIO PRINCIPAL
 # ==============================================================================
 st.sidebar.title("Opciones de Análisis")
 sorted_periods = sorted(st.session_state.datos_historicos.keys(), reverse=True)
@@ -208,7 +356,7 @@ period_options = ["Análisis de Evolución (Tendencias)"] + sorted_periods
 selected_view = st.sidebar.selectbox("Selecciona la vista de análisis:", period_options)
 
 # ==============================================================================
-#                  VISTA DE ANÁLISIS DE TENDENCIAS
+#                    VISTA DE ANÁLISIS DE TENDENCIAS
 # ==============================================================================
 if selected_view == "Análisis de Evolución (Tendencias)":
     st.header("📈 Informe de Evolución Gerencial")
@@ -256,7 +404,7 @@ if selected_view == "Análisis de Evolución (Tendencias)":
     st.plotly_chart(fig_combinada, use_container_width=True)
 
 # ==============================================================================
-#                  VISTA DE PERIODO ÚNICO (CENTRO DE ANÁLISIS PROFUNDO)
+#            VISTA DE PERIODO ÚNICO (CENTRO DE ANÁLISIS PROFUNDO)
 # ==============================================================================
 else:
     st.header(f"Centro de Análisis para el Periodo: {selected_view}")
@@ -361,7 +509,7 @@ else:
                 st.markdown("✅ **Impactos Positivos (Ayudaron a la Utilidad)**")
                 st.dataframe(top_favorables.style.format(format_dict).background_gradient(cmap='Greens', subset=['Variacion_Absoluta']), use_container_width=True)
             with col2:
-                st.markdown("❌ **Impactos Negativos (Perjudicaron la Utilidad)**")
+                st.markdown("❌ **Impactos Negativos (Perjudicarion la Utilidad)**")
                 st.dataframe(top_desfavorables.style.format(format_dict).background_gradient(cmap='Reds_r', subset=['Variacion_Absoluta']), use_container_width=True)
         else:
             st.info("Se requiere un periodo anterior para este análisis.")
@@ -480,13 +628,19 @@ else:
                 st.info(f"No se encontraron cuentas en el BG para '{search_account_input}'.")
 
     st.sidebar.markdown("---")
-    er_to_dl = generate_financial_statement(df_er_actual, 'Estado de Resultados', cc_filter, 99)
-    bg_to_dl = generate_financial_statement(df_bg_actual, 'Balance General', 99)
-    excel_buffer = to_excel_buffer(er_to_dl, bg_to_dl)
+    # --- SECCIÓN DE DESCARGA MODIFICADA ---
+    # Se eliminó la llamada a las funciones anteriores y ahora se usa la nueva función.
+    excel_buffer_profesional = generar_excel_gerencial_profesional(
+        df_er_master=df_er_actual,
+        df_bg_master=df_bg_actual,
+        datos_periodo=data_actual,
+        periodo_actual_str=selected_view
+    )
     st.sidebar.download_button(
-        label=f"📥 Descargar Reportes ({selected_view}, {cc_filter})",
-        data=excel_buffer,
-        file_name=f"Reporte_Financiero_{selected_view}_{cc_filter}.xlsx",
+        label=f"📥 Descargar Reporte Gerencial",
+        data=excel_buffer_profesional,
+        file_name=f"Reporte_Gerencial_{selected_view}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
+        use_container_width=True,
+        type="primary"
     )
