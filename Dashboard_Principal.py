@@ -28,7 +28,7 @@ from analisis_adicional import calcular_analisis_vertical, calcular_analisis_hor
 # Las funciones de análisis y visualización están diseñadas para interpretar esta lógica.
 
 # ==============================================================================
-#         NUEVA FUNCIÓN PARA CONSOLIDACIÓN ANUAL
+#         NUEVA FUNCIÓN PARA CONSOLIDACIÓN ANUAL (CORREGIDA)
 # ==============================================================================
 def consolidar_datos_anuales(datos_historicos: Dict[str, Any], anio: int) -> Optional[Dict[str, Any]]:
     """
@@ -65,15 +65,18 @@ def consolidar_datos_anuales(datos_historicos: Dict[str, Any], anio: int) -> Opt
         if col in cc_cols or col == 'Total_Consolidado_ER':
              columnas_a_sumar_er.append(col)
 
-
     for periodo in periodos_del_anio:
-        df_er_list.append(datos_historicos[periodo]['df_er_master'])
+        # ▼▼▼ CORRECCIÓN APLICADA ▼▼▼
+        # Se corrigió el nombre de la variable de 'df_er_list' a 'df_er_anual_list'
+        df_er_anual_list.append(datos_historicos[periodo]['df_er_master'])
 
-    df_er_anual = pd.concat(df_er_list)
+    df_er_anual = pd.concat(df_er_anual_list)
     
     columnas_agrupacion_er = [cuenta_col_er, desc_col_er, nivel_col_er]
-    df_er_anual = df_er_anual.groupby(columnas_agrupacion_er, as_index=False)[columnas_a_sumar_er].sum()
-
+    # Asegurarnos de que las columnas de agrupación existan antes de agrupar
+    columnas_agrupacion_er_validas = [col for col in columnas_agrupacion_er if col in df_er_anual.columns]
+    
+    df_er_anual = df_er_anual.groupby(columnas_agrupacion_er_validas, as_index=False)[columnas_a_sumar_er].sum()
 
     # --- Consolidación del Balance General (BS) ---
     # Se toma el balance del último mes del año.
@@ -139,25 +142,19 @@ def _escribir_hoja_resumen(writer, datos_periodo, periodo_actual_str, formats):
     ws.set_column('A:A', 25)
     ws.set_column('B:Z', 18)
 
-# ▼▼▼ FUNCIÓN CORREGIDA ▼▼▼
-# Ahora acepta el parámetro 'nivel_detalle'
 def _escribir_hoja_er(writer, df_er_master, formats, nivel_detalle: int):
     """Función auxiliar para escribir la hoja de Estado de Resultados."""
     ws = writer.book.add_worksheet('Estado de Resultados')
     er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
     cuenta_col = er_conf.get('CUENTA', 'Cuenta')
-    # Corregido: El nombre de la columna en el config es NOMBRE_CUENTA
     desc_col = er_conf.get('NOMBRE_CUENTA', 'Título')
     nivel_col = er_conf.get('NIVEL_LINEA', 'Grupo')
 
-    # ▼▼▼ CORRECCIÓN APLICADA ▼▼▼
-    # Se reemplaza el valor fijo '4' por el parámetro 'nivel_detalle'
     df_er_filtrado = df_er_master[df_er_master[nivel_col] <= nivel_detalle].copy()
 
     df_reporte_er = df_er_filtrado[[cuenta_col, desc_col, nivel_col]].drop_duplicates().sort_values(cuenta_col)
 
     cc_cols_er = [name for name in er_conf.get('CENTROS_COSTO_COLS', {}).values() if name in df_er_master]
-    # Asegurémonos de que 'Total_Consolidado_ER' exista antes de añadirlo si no está
     if 'Total_Consolidado_ER' in df_er_master.columns and 'Total_Consolidado_ER' not in cc_cols_er:
         cc_cols_er.append('Total_Consolidado_ER')
 
@@ -175,8 +172,6 @@ def _escribir_hoja_er(writer, df_er_master, formats, nivel_detalle: int):
 
     for row_num, record in enumerate(df_reporte_er.to_dict('records'), start=1):
         nivel = record.get(nivel_col, 99)
-        # Identificamos los totales por el nivel más alto de la jerarquía (ej. nivel 1)
-        # O por los niveles de subtotal que definamos (ej. nivel 4)
         is_total_row = nivel <= 1
 
         row_format = formats['nivel4'] if is_total_row else None
@@ -222,18 +217,15 @@ def _escribir_hoja_bg(writer, df_bg_master, formats):
     ws.set_column('B:B', 45)
     ws.set_column('C:C', 20)
 
-# ▼▼▼ FUNCIÓN CORREGIDA ▼▼▼
-# Ahora acepta el parámetro 'nivel_detalle_er'
 def generar_excel_gerencial_profesional(
     df_er_master: pd.DataFrame,
     df_bg_master: pd.DataFrame,
     datos_periodo: Dict[str, Any],
     periodo_actual_str: str,
-    nivel_detalle_er: int  # <-- Nuevo parámetro
+    nivel_detalle_er: int
 ) -> bytes:
     """
     Crea un archivo Excel profesional y gerencial con múltiples pestañas y formato avanzado.
-    Utiliza funciones auxiliares para cada hoja para mayor claridad y mantenibilidad.
     """
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
@@ -251,10 +243,7 @@ def generar_excel_gerencial_profesional(
             'nivel4': workbook.add_format({'bold': True})
         }
 
-        # Llamar a cada función para construir su respectiva hoja
         _escribir_hoja_resumen(writer, datos_periodo, periodo_actual_str, formats)
-        # ▼▼▼ CORRECCIÓN APLICADA ▼▼▼
-        # Se pasa el nuevo parámetro a la función que escribe la hoja del ER
         _escribir_hoja_er(writer, df_er_master, formats, nivel_detalle_er)
         _escribir_hoja_bg(writer, df_bg_master, formats)
 
@@ -275,9 +264,9 @@ def plot_sparkline(data: pd.Series, title: str, is_percent: bool = False, lower_
     first_val = data.iloc[0]
 
     if (lower_is_better and last_val < first_val) or (not lower_is_better and last_val > first_val):
-        color = '#28a745'  # Verde (Mejora)
+        color = '#28a745'
     else:
-        color = '#dc3545'  # Rojo (Empeora)
+        color = '#dc3545'
 
     fig = go.Figure(go.Scatter(
         x=list(range(len(data))), y=data, mode='lines',
@@ -295,7 +284,7 @@ def calcular_variaciones_er(df_actual: pd.DataFrame, df_previo: pd.DataFrame, cc
     """Calcula las variaciones absolutas y porcentuales para el Estado de Resultados."""
     er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
     cuenta_col = er_conf.get('CUENTA', 'Cuenta')
-    desc_col = er_conf.get('NOMBRE_CUENTA', 'Título') # Corregido para coincidir con config
+    desc_col = er_conf.get('NOMBRE_CUENTA', 'Título')
     valor_col_nombre = 'Total_Consolidado_ER' if cc_filter == 'Todos' else cc_filter
 
     required_cols_actual = [cuenta_col, desc_col, valor_col_nombre]
@@ -356,7 +345,7 @@ def plot_waterfall_utilidad_neta(df_variacion: pd.DataFrame, periodo_actual: str
     fig = go.Figure(go.Waterfall(
         name="Variación", orientation="v",
         measure=["absolute"] + medidas + ["total"],
-        x=["Utilidad Neta " + periodo_previo, "Ingresos", "Costos", "Gastos Op.", "Otros", "Utilidad Neta " + periodo_actual],
+        x=["Utilidad Neta " + str(periodo_previo), "Ingresos", "Costos", "Gastos Op.", "Otros", "Utilidad Neta " + str(periodo_actual)],
         text=[""] + textos + [""],
         y=[utilidad_neta_previa, variacion_ingresos, variacion_costos, variacion_gastos, otras_variaciones, utilidad_neta_actual],
         connector={"line": {"color": "rgb(63, 63, 63)"}},
@@ -441,8 +430,23 @@ if not st.session_state.datos_historicos:
 st.sidebar.title("Opciones de Análisis")
 sorted_periods = sorted(st.session_state.datos_historicos.keys(), reverse=True)
 
-# ▼▼▼ LÓGICA MODIFICADA PARA AÑADIR VISTA ANUAL ▼▼▼
-available_years = sorted(list(set([p.year for p in pd.to_datetime(sorted_periods, format='%Y%m')])))
+# ▼▼▼ BLOQUE CORREGIDO PARA EVITAR EL ERROR 'ValueError' ▼▼▼
+# Este bloque ahora maneja de forma segura los periodos que no tengan el formato 'YYYYMM'.
+valid_years = []
+for period_str in sorted_periods:
+    try:
+        # Intenta convertir la cadena a fecha para extraer el año
+        year = pd.to_datetime(period_str, format='%Y%m').year
+        valid_years.append(year)
+    except ValueError:
+        # Si una cadena no coincide con el formato (ej. archivo mal nombrado),
+        # se ignora para no detener la aplicación.
+        st.warning(f"Se ignoró un periodo con formato inválido encontrado: '{period_str}'")
+        continue
+
+# Obtenemos la lista única y ordenada de años válidos.
+available_years = sorted(list(set(valid_years)), reverse=True)
+
 period_options = ["Análisis de Evolución (Tendencias)", "Análisis Anual"] + sorted_periods
 selected_view = st.sidebar.selectbox("Selecciona la vista de análisis:", period_options)
 
@@ -452,9 +456,12 @@ selected_year = None
 # Si se elige la vista anual, mostramos un selector de año
 if selected_view == "Análisis Anual":
     is_annual_view = True
-    selected_year = st.sidebar.selectbox("Selecciona el año a consolidar:", available_years, index=len(available_years)-1)
-    # Sobreescribimos la variable `selected_view` para usarla como título
-    selected_view = f"Consolidado Anual {selected_year}"
+    if available_years:
+        selected_year = st.sidebar.selectbox("Selecciona el año a consolidar:", available_years)
+        selected_view = f"Consolidado Anual {selected_year}"
+    else:
+        st.sidebar.error("No hay años con datos válidos para analizar.")
+        st.stop()
 # ==============================================================================
 #               VISTA DE ANÁLISIS DE TENDENCIAS
 # ==============================================================================
@@ -508,13 +515,11 @@ if selected_view == "Análisis de Evolución (Tendencias)":
 else:
     st.header(f"Centro de Análisis para: {selected_view}")
 
-    # ▼▼▼ LÓGICA MODIFICADA PARA CARGAR DATOS MENSUALES O ANUALES ▼▼▼
     if is_annual_view and selected_year:
         data_actual = consolidar_datos_anuales(st.session_state.datos_historicos, selected_year)
-        # Para comparación, consolidamos el año anterior
         data_previa = consolidar_datos_anuales(st.session_state.datos_historicos, selected_year - 1)
         periodo_previo = f"Consolidado Anual {selected_year - 1}" if data_previa else None
-    else: # Vista mensual (original)
+    else:
         data_actual = st.session_state.datos_historicos.get(selected_view)
         periodo_actual_idx = sorted_periods.index(selected_view)
         periodo_previo = sorted_periods[periodo_actual_idx + 1] if periodo_actual_idx + 1 < len(sorted_periods) else None
@@ -534,11 +539,10 @@ else:
     er_conf = COL_CONFIG['ESTADO_DE_RESULTADOS']
     nivel_col = er_conf.get('NIVEL_LINEA', 'Grupo')
     if nivel_col in df_er_actual.columns:
-        # Asegurarse de que el nivel máximo es un número válido
         max_nivel = int(pd.to_numeric(df_er_actual[nivel_col], errors='coerce').max())
         nivel_seleccionado = st.sidebar.slider("Nivel de Detalle de Cuentas:", 1, max_nivel, 4, key=f"nivel_er_{selected_view}")
     else:
-        nivel_seleccionado = 4 # Valor por defecto si la columna no existe
+        nivel_seleccionado = 4
 
     st.sidebar.subheader("Buscador de Cuentas")
     search_account_input = st.sidebar.text_input("Buscar por número de cuenta:", key=f"search_{selected_view}", placeholder="Ej: 510506")
@@ -598,19 +602,15 @@ else:
             col1, col2 = st.columns(2)
 
             top_favorables = df_variacion_er[df_variacion_er['Variacion_Absoluta'] > 0].sort_values('Variacion_Absoluta', ascending=False).head(10)
-            top_favorables = top_favorables[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']]
-
             top_desfavorables = df_variacion_er[df_variacion_er['Variacion_Absoluta'] < 0].sort_values('Variacion_Absoluta').head(10)
-            top_desfavorables = top_desfavorables[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']]
-
             format_dict = {'Valor_previo': '${:,.0f}', 'Valor_actual': '${:,.0f}', 'Variacion_Absoluta': '${:,.0f}'}
 
             with col1:
                 st.markdown("✅ **Impactos Positivos (Ayudaron a la Utilidad)**")
-                st.dataframe(top_favorables.style.format(format_dict).background_gradient(cmap='Greens', subset=['Variacion_Absoluta']), use_container_width=True)
+                st.dataframe(top_favorables[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict).background_gradient(cmap='Greens', subset=['Variacion_Absoluta']), use_container_width=True)
             with col2:
                 st.markdown("❌ **Impactos Negativos (Perjudicaron la Utilidad)**")
-                st.dataframe(top_desfavorables.style.format(format_dict).background_gradient(cmap='Reds_r', subset=['Variacion_Absoluta']), use_container_width=True)
+                st.dataframe(top_desfavorables[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict).background_gradient(cmap='Reds_r', subset=['Variacion_Absoluta']), use_container_width=True)
         else:
             st.info("Se requiere un periodo/año anterior para este análisis.")
 
@@ -619,11 +619,10 @@ else:
         cuenta_col = er_conf.get('CUENTA', 'Cuenta')
         valor_col_nombre = 'Total_Consolidado_ER' if cc_filter == 'Todos' else cc_filter
 
-        if df_variacion_er is not None and not df_variacion_er.empty:
+        if df_variacion_er is not None and not df_variacion_er.empty and periodo_previo:
             df_ing_var = df_variacion_er[df_variacion_er[cuenta_col].astype(str).str.startswith('4')]
             st.markdown(f"##### Comparativo de Ingresos vs. {periodo_previo}")
             st.bar_chart(data=df_ing_var.set_index('Descripción')[['Valor_actual', 'Valor_previo']])
-
             format_dict = {'Valor_previo': '${:,.0f}', 'Valor_actual': '${:,.0f}', 'Variacion_Absoluta': '${:,.0f}'}
             st.dataframe(df_ing_var[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict), use_container_width=True)
         else:
@@ -642,18 +641,17 @@ else:
             df_gastos = df_er_actual[df_er_actual[cuenta_col].astype(str).str.startswith('5')]
             st.markdown(f"#### Composición de Gastos de {selected_view}")
             desc_col_name = COL_CONFIG['ESTADO_DE_RESULTADOS'].get('NOMBRE_CUENTA', 'Título')
-
-            fig_treemap = px.treemap(df_gastos, path=[desc_col_name], values=df_gastos[valor_col_nombre].abs(),
+            fig_treemap = px.treemap(df_gastos, path=[px.Constant("Total Gastos"), desc_col_name], values=df_gastos[valor_col_nombre].abs(),
                                      title='Distribución de Gastos Operacionales',
                                      color=df_gastos[valor_col_nombre].abs(),
                                      color_continuous_scale='Reds')
+            fig_treemap.update_layout(margin = dict(t=50, l=25, r=25, b=25))
             st.plotly_chart(fig_treemap, use_container_width=True)
 
-        if df_variacion_er is not None and not df_variacion_er.empty:
+        if df_variacion_er is not None and not df_variacion_er.empty and periodo_previo:
             st.markdown(f"#### Comparativo de Gastos vs. {periodo_previo}")
             df_gas_var = df_variacion_er[df_variacion_er[cuenta_col].astype(str).str.startswith('5')]
             st.bar_chart(data=df_gas_var.set_index('Descripción')[['Valor_actual', 'Valor_previo']])
-
             format_dict = {'Valor_previo': '${:,.0f}', 'Valor_actual': '${:,.0f}', 'Variacion_Absoluta': '${:,.0f}'}
             st.dataframe(df_gas_var[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict), use_container_width=True)
 
@@ -670,7 +668,6 @@ else:
             }
             df_dupont = pd.DataFrame(dupont_data)
             df_dupont['Variación'] = df_dupont[selected_view] - df_dupont[periodo_previo]
-
             st.markdown("El **Análisis DuPont** descompone el ROE en tres palancas: eficiencia operativa (Margen Neto), eficiencia en el uso de activos (Rotación) y apalancamiento financiero.")
             st.dataframe(
                 df_dupont.style.format({selected_view: '{:.2%}', periodo_previo: '{:.2%}', 'Variación': '{:+.2%}'})
@@ -713,36 +710,27 @@ else:
 
             st.write("**Estado de Resultados**")
             df_search_er = df_er_actual[df_er_actual[cuenta_col_er].astype(str).str.startswith(search_account_input)]
-            if not df_search_er.empty:
-                st.dataframe(df_search_er)
-            else:
-                st.info(f"No se encontraron cuentas en el ER para '{search_account_input}'.")
+            st.dataframe(df_search_er if not df_search_er.empty else "No se encontraron cuentas en el ER.")
 
             st.write("**Balance General**")
             df_search_bg = df_bg_actual[df_bg_actual[cuenta_col_bg].astype(str).str.startswith(search_account_input)]
-            if not df_search_bg.empty:
-                st.dataframe(df_search_bg)
-            else:
-                st.info(f"No se encontraron cuentas en el BG para '{search_account_input}'.")
+            st.dataframe(df_search_bg if not df_search_bg.empty else "No se encontraron cuentas en el BG.")
 
     st.sidebar.markdown("---")
-    # ▼▼▼ CORRECCIÓN APLICADA ▼▼▼
-    # Se pasa el 'nivel_seleccionado' del slider a la función de generación de Excel.
     excel_buffer_profesional = generar_excel_gerencial_profesional(
         df_er_master=df_er_actual,
         df_bg_master=df_bg_actual,
         datos_periodo=data_actual,
-        periodo_actual_str=str(selected_view), # Aseguramos que sea string
-        nivel_detalle_er=nivel_seleccionado # <-- Parámetro añadido
+        periodo_actual_str=str(selected_view),
+        nivel_detalle_er=nivel_seleccionado
     )
     
-    # Nombre del archivo dinámico para mensual o anual
     file_name_prefix = "Reporte_Gerencial_Anual" if is_annual_view else "Reporte_Gerencial_Mensual"
     
     st.sidebar.download_button(
         label=f"📥 Descargar Reporte Gerencial",
         data=excel_buffer_profesional,
-        file_name=f"{file_name_prefix}_{selected_view}.xlsx",
+        file_name=f"{file_name_prefix}_{selected_view.replace(' ', '_')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
         type="primary"
