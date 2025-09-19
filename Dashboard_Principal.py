@@ -609,8 +609,7 @@ else:
                 st.markdown("✅ **Impactos Positivos (Ayudaron a la Utilidad)**")
                 st.dataframe(top_favorables[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict).background_gradient(cmap='Greens', subset=['Variacion_Absoluta']), use_container_width=True)
             with col2:
-                st.markdown("❌ **Impactos Negativos (Perjudicar
-on la Utilidad)**")
+                st.markdown("❌ **Impactos Negativos (Perjudicaron la Utilidad)**")
                 st.dataframe(top_desfavorables[['Descripción', 'Valor_previo', 'Valor_actual', 'Variacion_Absoluta']].style.format(format_dict).background_gradient(cmap='Reds_r', subset=['Variacion_Absoluta']), use_container_width=True)
         else:
             st.info("Se requiere un periodo/año anterior para este análisis.")
